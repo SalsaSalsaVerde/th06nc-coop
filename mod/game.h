@@ -241,6 +241,8 @@ const RvaRange kNeverRestore[] = {
     { 0x7E0098, 0x7E3D6C },
     { 0x7E60B0, 0x7FAACC },
     { 0x58E3BC, 0x58E7E8 },
+    { 0x555000, 0x556200 }, // sound channel flags, set as effects play
+    { 0x9881D8, 0x9886E8 },
     // Written by the heap-resident screen-shake task: cosmetic.
     { 0x53CAC0, 0x53CAD0 }, // camera / shake offsets
     { 0x549F70, 0x549F80 }, // shake amplitude
