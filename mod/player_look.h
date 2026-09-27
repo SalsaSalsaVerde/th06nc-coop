@@ -15,6 +15,10 @@ struct LookSettings {
     bool proximityFade = true;
     bool outline = true;
     bool focusRing = true;
+    // Depth offset of the outline copies relative to the sprite. The game's
+    // sprite pipeline treats a larger z as nearer (docs/11), so a negative
+    // value puts the outline behind the sprite.
+    float outlineDepthOffset = -0.004f;
 };
 
 // Hooks the three player draw functions (and skips drawing a downed player,

@@ -12,13 +12,16 @@ struct Config {
     int player2ShotType = -1;          // 0 A, 1 B, -1 same as P1
 
     int p2PadIndex = 1;                 // XInput user index for P2, -1 = none
-    int p2KeyUp = 'I';
-    int p2KeyDown = 'K';
-    int p2KeyLeft = 'J';
-    int p2KeyRight = 'L';
-    int p2KeyShoot = 'U';
-    int p2KeyBomb = 'O';
-    int p2KeyFocus = 'Y';
+    // The game itself binds a second layout -- W/A/S/D move, J shoot,
+    // K bomb, L focus, plus Q, R and the numpad -- so P2's keys stay clear
+    // of those (docs/11).
+    int p2KeyUp = 'T';
+    int p2KeyDown = 'G';
+    int p2KeyLeft = 'F';
+    int p2KeyRight = 'H';
+    int p2KeyShoot = 'O';
+    int p2KeyBomb = 'P';
+    int p2KeyFocus = 'I';
 
     CoopSettings coop; // [coop]; online, the host's are used
     LookSettings look; // [visual]; each machine its own (colors are exchanged)

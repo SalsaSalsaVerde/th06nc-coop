@@ -56,7 +56,9 @@ straight in; `-Restore` puts the previous proxy back).
 ## Playing
 
 - **Same machine**: Player 2 uses a second controller (XInput index 1) or
-  I/J/K/L + U (shoot) / O (bomb) / Y (focus). P2's character is set in the
+  T/F/G/H to move + O (shoot) / P (bomb) / I (focus). The game's own second
+  layout uses W/A/S/D and J/K/L, so P2's keys stay clear of those. P2's
+  character is set in the
   ini (`[player2] character=`).
 - **Online**: host presses **F9** (creates a Steam lobby and opens the
   invite dialog), friend accepts. Each picks their own character; the

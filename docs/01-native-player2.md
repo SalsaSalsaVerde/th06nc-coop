@@ -50,8 +50,8 @@ P2 can be a different character/shot type than P1 — see docs/04.
 ## Controls
 
 P2 reads XInput controller index `pad_index` (default 1, the second
-controller; the game reads index 0 for P1) plus keyboard I/J/K/L move, U
-shoot, O bomb, Y focus. Keyboard input only counts while the game window is
+controller; the game reads index 0 for P1) plus keyboard T/F/G/H move, O
+shoot, P bomb, I focus. Keyboard input only counts while the game window is
 focused. All configurable, see `mod/th06nc_native_coop.example.ini`.
 
 ## First live test — what to check, in order
@@ -65,7 +65,7 @@ Install: `powershell -File mod\deploy.ps1` (backs up the overlay mod's DLL to
    updated and nothing was installed.
 2. Start Stage 1. Log shows `Player2: spawned`. A second copy of your
    character appears to the right of P1.
-3. Move P2 with IJKL or the second controller; P1 unaffected and vice
+3. Move P2 with T/F/G/H or the second controller; P1 unaffected and vice
    versa.
 4. P2 shoots (U / A button); shots damage enemies and the boss.
 5. P2 bombs (O / B button): bomb animation plays at P2, bullets near P2's

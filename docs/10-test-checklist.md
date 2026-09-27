@@ -5,8 +5,8 @@ depends on the ones above it. After any failure, the useful thing to send
 back is `th06nc_native_coop.log` (game folder) plus what you saw.
 
 The installed ini has `[player2] enabled=1`, so a second player appears in
-every stage from the start. P2's keys: **I/J/K/L** move, **U** shoot, **O**
-bomb, **Y** focus (or a second controller).
+every stage from the start. P2's keys: **T/F/G/H** move, **O** shoot, **P**
+bomb, **I** focus (or a second controller).
 
 ## 1. Boots at all
 

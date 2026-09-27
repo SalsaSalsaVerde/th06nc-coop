@@ -52,6 +52,20 @@ enum Item {
     kItemCount
 };
 
+// A short label for a virtual-key code, for the panel's key line.
+const char* KeyName(int vk) {
+    static char buf[8][4];
+    static int next = 0;
+    char* out = buf[next++ % 8];
+    if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9')) {
+        out[0] = static_cast<char>(vk);
+        out[1] = '\0';
+    } else {
+        snprintf(out, 4, "#%d", vk % 100);
+    }
+    return out;
+}
+
 bool IsGuest() {
     return Netplay_LocalPlayerIndex() == 1;
 }
@@ -354,7 +368,7 @@ void SettingsPanel_Draw(OverlayRenderer& overlay) {
     const float charH = 16.0f / 816.0f;
     const float lineStep = 0.032f;
     const float valueX = left + 0.34f;
-    float height = lineStep * (kItemCount + 5);
+    float height = lineStep * (kItemCount + 6);
     overlay.DrawQuad(OverlayQuad{ 0.5f, top + height * 0.5f - 0.02f, 0.33f, height * 0.5f + 0.02f, 0.03f, 0.03f, 0.08f, 0.85f });
 
     DrawText(overlay, "CO-OP SETTINGS", left, top, charW * 1.5f, charH * 1.5f, 1.0f, 1.0f, 0.9f, 0.6f);
@@ -373,4 +387,10 @@ void SettingsPanel_Draw(OverlayRenderer& overlay) {
     }
     DrawText(overlay, "UP/DOWN SELECT   LEFT/RIGHT CHANGE   BOMB OR F8 CLOSES AND SAVES", left,
              top + lineStep * (kItemCount + 3.0f), charW * 0.75f, charH * 0.75f, 0.8f);
+    const Config& c = Config_Get();
+    char keys[96];
+    snprintf(keys, sizeof(keys), "P2 KEYS: %s%s%s%s MOVE   %s SHOOT   %s BOMB   %s FOCUS   (OR PAD %d)",
+             KeyName(c.p2KeyUp), KeyName(c.p2KeyLeft), KeyName(c.p2KeyDown), KeyName(c.p2KeyRight),
+             KeyName(c.p2KeyShoot), KeyName(c.p2KeyBomb), KeyName(c.p2KeyFocus), c.p2PadIndex);
+    DrawText(overlay, keys, left, top + lineStep * (kItemCount + 3.8f), charW * 0.75f, charH * 0.75f, 0.8f);
 }

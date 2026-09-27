@@ -34,6 +34,38 @@ uint32_t ReadColor(const char* path, const char* key, uint32_t fallback) {
     return static_cast<uint32_t>(value) & 0xFFFFFF;
 }
 
+// Keys th06nc reads for Player 1 (its own two layouts, docs/11): a P2 key
+// among them moves both players at once.
+bool GameBindsKey(int vk) {
+    switch (vk) {
+        case 'W': case 'A': case 'S': case 'D': case 'Q': case 'R':
+        case 'J': case 'K': case 'L': case 'Z': case 'X':
+        case VK_ESCAPE: case VK_RETURN: case VK_CONTROL: case VK_LCONTROL: case VK_RCONTROL:
+        case VK_SHIFT: case VK_LSHIFT: case VK_RSHIFT: case VK_SPACE: case VK_OEM_1:
+        case VK_UP: case VK_DOWN: case VK_LEFT: case VK_RIGHT:
+        case VK_PRIOR: case VK_NEXT: case VK_HOME: case VK_END:
+        case VK_NUMPAD1: case VK_NUMPAD2: case VK_NUMPAD3: case VK_NUMPAD4: case VK_NUMPAD6:
+        case VK_NUMPAD7: case VK_NUMPAD8: case VK_NUMPAD9:
+            return true;
+        default:
+            return false;
+    }
+}
+
+void WarnAboutBoundKeys(const Config& c) {
+    const struct { const char* name; int vk; } keys[] = {
+        { "key_up", c.p2KeyUp }, { "key_down", c.p2KeyDown }, { "key_left", c.p2KeyLeft },
+        { "key_right", c.p2KeyRight }, { "key_shoot", c.p2KeyShoot }, { "key_bomb", c.p2KeyBomb },
+        { "key_focus", c.p2KeyFocus },
+    };
+    for (const auto& k : keys) {
+        if (GameBindsKey(k.vk)) {
+            ModLog("Config: WARNING [player2] %s=%d is a key the game itself reads for Player 1 (W/A/S/D, J/K/L, Q, R,"
+                   " Z/X, Shift, arrows, numpad...) -- pressing it will move or fire Player 1 too", k.name, k.vk);
+        }
+    }
+}
+
 } // namespace
 
 void Config_Load() {
@@ -66,6 +98,8 @@ void Config_Load() {
     c.p2KeyBomb = ReadInt(path, "player2", "key_bomb", c.p2KeyBomb);
     c.p2KeyFocus = ReadInt(path, "player2", "key_focus", c.p2KeyFocus);
 
+    WarnAboutBoundKeys(c);
+
     c.coop.bossHpMultiplier = ReadFloat(path, "coop", "boss_hp_multiplier", c.coop.bossHpMultiplier);
     c.coop.invincible = ReadInt(path, "coop", "invincible", 0) != 0;
     c.coop.sharedResources = ReadInt(path, "coop", "shared_resources", 1) != 0;
@@ -87,6 +121,7 @@ void Config_Load() {
     c.look.proximityFade = ReadInt(path, "visual", "proximity_fade", 1) != 0;
     c.look.outline = ReadInt(path, "visual", "outline", 1) != 0;
     c.look.focusRing = ReadInt(path, "visual", "focus_ring", 1) != 0;
+    c.look.outlineDepthOffset = ReadFloat(path, "visual", "outline_depth", c.look.outlineDepthOffset);
 
     char mode[32] = {};
     GetPrivateProfileStringA("netplay", "mode", "rollback", mode, sizeof(mode), path);

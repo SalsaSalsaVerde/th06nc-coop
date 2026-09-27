@@ -28,9 +28,6 @@ const float kFadeFar = 100.0f;
 const float kFadeNearOpacity = 0.20f;
 const float kOutlineMaxAlpha = 0.75f;
 const float kOutlineOffset = 1.5f;
-// The outline copies sit a little farther back than the sprite. Drawn at the
-// same depth they won the depth test and painted the sprite black (docs/11).
-const float kOutlineDepthOffset = 0.004f;
 
 int PlayerIndex(const uint8_t* player) {
     if (player == Game::Player1()) return 0;
@@ -123,7 +120,7 @@ void DrawOutline(uint8_t* player, float alpha) {
     for (const auto& o : offsets) {
         pos[0] = Pos(player)[0] + o[0];
         pos[1] = Pos(player)[1] + o[1];
-        pos[2] = Game::kPlayerSpriteZ + kOutlineDepthOffset;
+        pos[2] = Game::kPlayerSpriteZ + g_settings.outlineDepthOffset;
         Game::Fn<DrawVmFn>(Game::kFnDrawVm)(0, vm, 1);
     }
     VmColor(vm) = savedColor;
