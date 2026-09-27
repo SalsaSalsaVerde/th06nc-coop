@@ -49,6 +49,11 @@ int Player2_WantedShotType();
 // The loadout the active P2 actually spawned with.
 void Player2_CurrentLoadout(uint8_t* character, uint8_t* shotType);
 
+// Re-derives the active P2 from P1's stage-start state as another character
+// (the guest's pick arrived after the host started the stage, docs/13). Only
+// valid while the simulation sits at the stage's first frame.
+bool Player2_ReapplyLoadout(int character, int shotType);
+
 // P2's own lives/bombs/power when the co-op setting sharedResources is off
 // (docs/06). Swapped into the game's resource globals around P2's update
 // and P2's item pickups; persists across stages within a run.

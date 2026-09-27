@@ -498,6 +498,31 @@ void Spawn() {
     if (g_listener.onSpawned) g_listener.onSpawned();
 }
 
+// The active P2 as another character, without re-registering its tasks: the
+// host learns the guest's final pick only at the stage barrier when the guest
+// was still choosing while the host started (docs/13). P1 has just been put
+// back to its freshly-initialized state by the barrier, so P2 is re-derived
+// from it exactly as Spawn derives it.
+bool ReapplyLoadout(int character, int shotType) {
+    if (!g_active) return false;
+    g_wantedCharacter = character;
+    g_wantedShot = shotType;
+    UnloadSheet();
+    memcpy(g_p2, Game::Player1(), Game::kPlayerStructSize);
+    *reinterpret_cast<float*>(g_p2 + Game::kPlayerPosX) += Config_Get().player2SpawnOffsetX;
+    SetUpCharacter();
+    auto** nodePtrs = reinterpret_cast<TaskNode**>(g_p2 + Game::kPlayerNodePtrs);
+    for (int i = 0; i < kNodeCount; i++) {
+        nodePtrs[i] = &g_nodes[i];
+    }
+    g_state.previousInput = 0;
+    PlayerLook_OnStageStart();
+    uint8_t c = 0, s = 0;
+    Player2_CurrentLoadout(&c, &s);
+    ModLog("Player2: loadout re-applied at the barrier -> %s%c", c ? "Marisa" : "Reimu", 'A' + s);
+    return true;
+}
+
 uint64_t Detour_RegisterPlayer() {
     uint64_t result = g_origRegisterPlayer();
     if (result == 0) g_inStage = true;
@@ -803,6 +828,10 @@ void Player2_SetLoadout(int character, int shotType) {
 
 PlayerResources* Player2_Resources() {
     return &g_state.resources;
+}
+
+bool Player2_ReapplyLoadout(int character, int shotType) {
+    return ReapplyLoadout(character, shotType);
 }
 
 void Player2_CurrentLoadout(uint8_t* character, uint8_t* shotType) {

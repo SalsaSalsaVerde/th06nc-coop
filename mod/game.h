@@ -164,9 +164,12 @@ const uintptr_t kStageNumber = 0x53CAD4;       // int32, 0-based: a new game wri
 const uintptr_t kContinuesUsed = 0x549D2C;     // u8
 const uintptr_t kLives = 0x549D40;             // u8
 const uintptr_t kBombs = 0x549D41;             // u8
-// Lives/bombs as they were at the stage's scene init (FUN_14003c250 copies
-// them). A respawn refills bombs from kStageStartBombs (outside Extra and
-// practice), not a constant.
+// Lives/bombs the run started with: FUN_14003c250 copies them at scene init
+// except on the next-stage path (scene state 0xC6DFBC == 3), so they hold
+// the values of the run's first stage all run long. A continue (the
+// game-over task FUN_14000bc20) refills lives and bombs from them; a respawn
+// refills bombs from kStageStartBombs (outside Extra and practice). Online
+// the guest adopts the host's (docs/13).
 const uintptr_t kStageStartLives = 0xC6E000;   // u8
 const uintptr_t kStageStartBombs = 0xC6E001;   // u8
 const uintptr_t kPower = 0x53CAD8;             // u32

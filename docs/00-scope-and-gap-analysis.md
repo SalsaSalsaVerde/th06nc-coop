@@ -218,7 +218,7 @@ decision.
 | A12 | P2 as a different character (own sprite slot, ID-table swap) + online loadout sync | built (docs/04) |
 | A13 | HUD for P2's resources | built as a status-text line (docs/06) |
 | A14 | Revive / spirit mode / out-of-lives rules | built: downed + revive timer (docs/06) |
-| A15 | Proximity translucency + outline, focus hitbox for the other player, per-player color | built (docs/07) |
+| A15 | Proximity translucency (player + shots), the game's focus marker on the other player, per-player color | built and live-tested (docs/07) |
 
 ### B. Deterministic input pipeline
 | # | Item | Status |
@@ -262,8 +262,8 @@ decision.
 | Boss HP multiplier (default 2x) | built (docs/05) |
 | Targeting mode | built (docs/05) |
 | Hue color per player | built as a multiply tint (docs/07) |
-| Other player translucent + outlined near you | built (docs/07) |
-| Showing the other player's focus | built: focus ring + hitbox (docs/07); the native orbs also close in |
+| Other player translucent near you | built (docs/07); the outline was dropped after live tests |
+| Showing the other player's focus | built: the game's own focus marker on P2 (docs/07); the native orbs also close in |
 | Checkpoints | stage checkpoints built and tested (docs/08); midboss and boss start points built, untested (docs/12); individual stage spells not built |
 
 ## Milestone order

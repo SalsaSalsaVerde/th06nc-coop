@@ -9,8 +9,10 @@ through a Steam lobby with rollback netcode.
 Successor to the overlay-based mod in `..\Touhou Coop Mod` (whose `docs/`
 are the research record this builds on; referenced here as `overlay/NN`).
 
-**Status: installed in the game (2026-09-27), not yet live-tested.** See
-`docs/10` for the test checklist and `docs/00` for what's done.
+**Status (2026-09-27): local play live-tested and working; the rollback
+self-test passes; the first two-machine test held lockstep sync for two
+full stages (docs/13), and rollback mode is next.** See `docs/10` for the
+test checklist and `docs/00` for what's done.
 
 ## Docs
 
@@ -37,6 +39,8 @@ are the research record this builds on; referenced here as `overlay/NN`).
   how it was fixed
 - `docs/12-stage-timeline-and-start-points.md` — the stage timeline;
   midboss / boss start points
+- `docs/13-first-online-test.md` — the first two-machine test: what the
+  logs showed, the continue desync, the late-pick race, and the fixes
 
 ## Install
 
@@ -67,7 +71,8 @@ straight in; `-Restore` puts the previous proxy back).
 - **Online**: host presses **F9** (creates a Steam lobby and opens the
   invite dialog), friend accepts. Each picks their own character; the
   host's difficulty is used. Both start the stage and the game waits until
-  both have. The host is Player 1, the guest Player 2; each uses their
+  both have (a guest who starts first sees the screen hold until the host
+  starts). The host is Player 1, the guest Player 2; each uses their
   normal controls. **F10** leaves the lobby.
 - **Settings**: **F8** in the game's menus opens the co-op settings panel
   (rules, starting stock, checkpoint stage, colors); online the host's

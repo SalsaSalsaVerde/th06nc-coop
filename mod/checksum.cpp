@@ -81,6 +81,10 @@ GameChecksum Checksum_Compute(const uint8_t* player2) {
     MixValue(resources, *Game::At<uint32_t>(Game::kPower));
     MixValue(resources, *Game::At<uint32_t>(Game::kScore));
     MixValue(resources, *Game::At<uint32_t>(Game::kGraze));
+    // What a continue refills to (docs/13): set once per run, so a stage
+    // start that adopts the wrong value only shows at the next continue.
+    MixValue(resources, *Game::At<uint8_t>(Game::kStageStartLives));
+    MixValue(resources, *Game::At<uint8_t>(Game::kStageStartBombs));
     const PlayerResources* p2 = Player2_Resources();
     MixValue(resources, p2->lives);
     MixValue(resources, p2->bombs);

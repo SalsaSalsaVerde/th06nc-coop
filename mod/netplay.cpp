@@ -44,7 +44,7 @@ const char* StateName(State s) {
     return "?";
 }
 
-const uint8_t kProtocolVersion = 3;
+const uint8_t kProtocolVersion = 4;
 enum MsgType : uint8_t { kMsgReady = 1, kMsgInputs = 2, kMsgChecksum = 3, kMsgLoadout = 4 };
 
 #pragma pack(push, 1)
@@ -55,7 +55,10 @@ struct MsgHeader {
 };
 // Sent while in the menus: what this player has selected, so the stage can
 // start with the host's character as P1 and the guest's as P2 on both
-// machines, at the host's difficulty.
+// machines, at the host's difficulty. Sent once more, reliably and with
+// `committed` set, the moment this machine starts a stage (docs/13): the
+// menu-time copies are unreliable and the last one can arrive after the
+// partner already started.
 struct LoadoutMsg {
     MsgHeader header;
     uint8_t character;
@@ -63,6 +66,7 @@ struct LoadoutMsg {
     uint8_t difficulty;
     CoopSettings coop; // the sender's; the guest adopts the host's
     uint32_t color;    // the sender's player color (visual only, docs/07)
+    uint8_t committed; // 1 = the sender's stage just started with this; header.session = that session
 };
 struct ReadyMsg {
     MsgHeader header;
@@ -87,6 +91,10 @@ struct ReadyMsg {
     uint8_t p2Lives;
     uint8_t p2Bombs;
     uint32_t p2Power;
+    // What a continue refills to: the run's starting stock, which the
+    // scene init copies only on the run's first stage (docs/13).
+    uint8_t stageStartLives;
+    uint8_t stageStartBombs;
 };
 const int kMaxInputsPerPacket = 32;
 struct InputsMsg {
@@ -212,6 +220,13 @@ Selection g_peerSelection = {};
 bool g_ownSelectionOverridden = false;
 Selection g_ownSelection = {};
 int g_selectionSendTimer = 0;
+Selection g_lastSentSelection = {};
+bool g_lastSentSelectionValid = false;
+// The session the peer's committed loadout (its stage start) was for; 0 = none.
+uint16_t g_peerCommitSession = 0;
+// How long a guest that reaches the stage first waits for the host's
+// committed loadout before starting on the tentative one (docs/13).
+const uint32_t kCommitWaitMs = 20000;
 
 Selection ReadSelection() {
     return Selection{ *Game::At<uint8_t>(Game::kCharacter), *Game::At<uint8_t>(Game::kShotType),
@@ -505,6 +520,8 @@ ReadyMsg MakeReady() {
     msg.p2Lives = p2->lives;
     msg.p2Bombs = p2->bombs;
     msg.p2Power = p2->power;
+    msg.stageStartLives = *Game::At<uint8_t>(Game::kStageStartLives);
+    msg.stageStartBombs = *Game::At<uint8_t>(Game::kStageStartBombs);
     return msg;
 }
 
@@ -528,10 +545,26 @@ void StartRunning() {
     const ReadyMsg& peer = g_peerReady;
     g_peerReadyValid = false;
 
-    bool match = peer.buildStamp == local.buildStamp && peer.character == local.character &&
-                 peer.shotType == local.shotType && peer.p2Character == local.p2Character &&
-                 peer.p2ShotType == local.p2ShotType && peer.difficulty == local.difficulty &&
-                 peer.stage == local.stage && CoopSettings_Equal(peer.coop, local.coop);
+    // The guest's READY carries the guest's own pick for P2. A host that
+    // started the stage while the guest was still choosing spawned P2 from
+    // the last menu-time message; P2 is the mod's own object, so it is
+    // simply re-derived here (docs/13). P1 is the game's player, so a guest
+    // that started before the host's final pick can't do the same.
+    if (IsHost() && (peer.p2Character != local.p2Character || peer.p2ShotType != local.p2ShotType)) {
+        ModLog("Netplay: the guest's final pick (%s%c) differs from the P2 spawned (%s%c) -- re-applying",
+               peer.p2Character ? "Marisa" : "Reimu", 'A' + peer.p2ShotType,
+               local.p2Character ? "Marisa" : "Reimu", 'A' + local.p2ShotType);
+        if (Player2_ReapplyLoadout(peer.p2Character, peer.p2ShotType)) {
+            g_p2AtInit.assign(Player2_Struct(), Player2_Struct() + Game::kPlayerStructSize);
+            local = MakeReady();
+        }
+    }
+
+    bool p1Match = peer.character == local.character && peer.shotType == local.shotType;
+    bool p2Match = peer.p2Character == local.p2Character && peer.p2ShotType == local.p2ShotType;
+    bool match = peer.buildStamp == local.buildStamp && p1Match && p2Match &&
+                 peer.difficulty == local.difficulty && peer.stage == local.stage &&
+                 CoopSettings_Equal(peer.coop, local.coop);
     if (!match) {
         ModLog("Netplay: MISMATCH -- local P1=%d%c P2=%d%c diff=%d stage=%d build=%08X, peer P1=%d%c P2=%d%c diff=%d stage=%d build=%08X."
                " Both players must start the same game mode and stage. Playing this stage locally.",
@@ -540,7 +573,14 @@ void StartRunning() {
                peer.character, 'A' + peer.shotType, peer.p2Character, 'A' + peer.p2ShotType,
                peer.difficulty, peer.stage, peer.buildStamp);
         Snapshot_EndCalibration();
-        SetState(State::Degraded, "the two games started differently");
+        const char* reason = "the two games started differently";
+        if (peer.buildStamp != local.buildStamp) reason = "different game builds";
+        else if (peer.stage != local.stage) reason = "different stages -- start the same one";
+        else if (!p1Match || peer.difficulty != local.difficulty) {
+            reason = IsHost() ? "the guest started before your final pick -- both quit to the title and start again"
+                              : "the host changed their pick after you started -- both quit to the title and start again";
+        }
+        SetState(State::Degraded, reason);
         return;
     }
 
@@ -550,11 +590,16 @@ void StartRunning() {
         *Game::At<uint32_t>(Game::kPower) = peer.power;
         *Game::At<uint32_t>(Game::kScore) = peer.score;
         *Game::At<int32_t>(Game::kGraze) = peer.graze;
-        // The scene init's stage-start copy (what respawns refill bombs
-        // to) was taken from this machine's own values: redo it.
-        *Game::At<uint8_t>(Game::kStageStartLives) = peer.lives;
-        *Game::At<uint8_t>(Game::kStageStartBombs) = peer.bombs;
+        // The run's starting stock, what a continue refills to. The scene
+        // init copies it from this machine's own lives on the run's first
+        // stage and leaves it alone afterwards, so it is the host's own
+        // copy that must be adopted -- not the host's current lives, which
+        // by a later stage may well be lower (docs/13).
+        *Game::At<uint8_t>(Game::kStageStartLives) = peer.stageStartLives;
+        *Game::At<uint8_t>(Game::kStageStartBombs) = peer.stageStartBombs;
         *Player2_Resources() = { peer.p2Lives, peer.p2Bombs, peer.p2Power, peer.p2Bombs };
+        ModLog("Netplay: adopted the host's resources -- lives %d bombs %d power %u score %u graze %d, run start lives %d bombs %d",
+               peer.lives, peer.bombs, peer.power, peer.score, peer.graze, peer.stageStartLives, peer.stageStartBombs);
     }
 
     // Both machines seeded the scene init identically (Detour_SceneInit), so
@@ -643,12 +688,13 @@ void OnMessage(const uint8_t* data, size_t size) {
                 LoadoutMsg msg;
                 memcpy(&msg, data, sizeof(msg));
                 Selection s{ msg.character, msg.shotType, msg.difficulty };
-                if (!g_peerSelectionValid || memcmp(&s, &g_peerSelection, sizeof(s)) != 0) {
-                    ModLog("Netplay: partner selected %s%c, difficulty %d", s.character ? "Marisa" : "Reimu",
-                           'A' + s.shotType, s.difficulty);
+                if (!g_peerSelectionValid || memcmp(&s, &g_peerSelection, sizeof(s)) != 0 || msg.committed) {
+                    ModLog("Netplay: partner %s %s%c, difficulty %d", msg.committed ? "started a stage with" : "selected",
+                           s.character ? "Marisa" : "Reimu", 'A' + s.shotType, s.difficulty);
                 }
                 g_peerSelection = s;
                 g_peerSelectionValid = true;
+                if (msg.committed) g_peerCommitSession = header.session;
                 g_partnerColor = msg.color & 0xFFFFFF;
                 g_partnerColorValid = true;
                 NormalizeBools(msg.coop);
@@ -668,19 +714,60 @@ void OnMessage(const uint8_t* data, size_t size) {
     }
 }
 
-// In the menus, keep the partner told what this player has selected.
-void SendSelection() {
-    if (--g_selectionSendTimer > 0) return;
-    g_selectionSendTimer = 10;
+LoadoutMsg MakeLoadout(uint16_t session, bool committed) {
     Selection s = ReadSelection();
     LoadoutMsg msg = {};
-    msg.header = Header(kMsgLoadout, g_session);
+    msg.header = Header(kMsgLoadout, session);
     msg.character = s.character;
     msg.shotType = s.shotType;
     msg.difficulty = s.difficulty;
     msg.coop = CoopRules_Settings();
     msg.color = PlayerLook_Settings().color;
-    Transport_Send(&msg, sizeof(msg), false);
+    msg.committed = committed ? 1 : 0;
+    return msg;
+}
+
+// In the menus, keep the partner told what this player has selected: a
+// change goes out reliably at once, and a copy every 10 frames besides.
+void SendSelection() {
+    Selection s = ReadSelection();
+    bool changed = !g_lastSentSelectionValid || memcmp(&s, &g_lastSentSelection, sizeof(s)) != 0;
+    if (!changed && --g_selectionSendTimer > 0) return;
+    g_selectionSendTimer = 10;
+    g_lastSentSelection = s;
+    g_lastSentSelectionValid = true;
+    LoadoutMsg msg = MakeLoadout(g_session, false);
+    Transport_Send(&msg, sizeof(msg), changed);
+}
+
+// The stage just started here with this selection (docs/13).
+void SendCommittedLoadout() {
+    LoadoutMsg msg = MakeLoadout(static_cast<uint16_t>(g_session + 1), true);
+    Transport_Send(&msg, sizeof(msg), true);
+}
+
+// A guest that reaches the stage before the host would build the stage on
+// the host's menu-time pick, which the host may still change; P1 and the
+// difficulty are the game's own and can't be redone afterwards. So the guest
+// waits here, before the stage init, for the host's committed loadout. The
+// screen holds its last frame meanwhile (this runs inside the scene switch).
+void WaitForHostCommit() {
+    if (IsHost() || g_peerCommitSession == static_cast<uint16_t>(g_session + 1)) return;
+    ModLog("Netplay: waiting for the host to start the stage before building it (up to %u s)", kCommitWaitMs / 1000);
+    ULONGLONG start = GetTickCount64();
+    while (GetTickCount64() - start < kCommitWaitMs) {
+        Transport_Receive(&OnMessage);
+        if (g_peerCommitSession == static_cast<uint16_t>(g_session + 1)) {
+            ModLog("Netplay: host started after %llu ms", static_cast<unsigned long long>(GetTickCount64() - start));
+            return;
+        }
+        if (!Transport_UpdatePeer()) {
+            ModLog("Netplay: peer gone while waiting for the host to start");
+            return;
+        }
+        Sleep(5);
+    }
+    ModLog("Netplay: the host hasn't started after %u s -- building the stage on their last selection", kCommitWaitMs / 1000);
 }
 
 // ---- per-frame driver -----------------------------------------------------
@@ -701,6 +788,8 @@ void UpdateConnection() {
     UpdateInputProvider();
     if (connected) {
         g_session = 0; // both sides count sessions from this connection
+        g_peerCommitSession = 0;
+        g_lastSentSelectionValid = false;
         int32_t* useFma3 = Game::At<int32_t>(Game::kCrtUseFma3);
         if (*useFma3 != 0) {
             ModLog("Netplay: switching CRT math from FMA3 to SSE2 paths (identical results on every CPU)");
@@ -921,6 +1010,13 @@ uint64_t Detour_SceneInit(void* scene) {
     if (*Game::At<uint8_t>(Game::kReplayFlag)) {
         // A replay plays back alone, from its own recorded seed.
         return g_origSceneInit(scene);
+    }
+    if (g_connected) {
+        SendCommittedLoadout();
+        WaitForHostCommit();
+        ModLog("Netplay: at scene init lives %d bombs %d, run start lives %d bombs %d",
+               *Game::At<uint8_t>(Game::kLives), *Game::At<uint8_t>(Game::kBombs),
+               *Game::At<uint8_t>(Game::kStageStartLives), *Game::At<uint8_t>(Game::kStageStartBombs));
     }
     ApplySelectionsForStage();
     CoopRules_OnSceneInit(g_connected || Player2_Enabled());

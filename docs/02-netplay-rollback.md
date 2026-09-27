@@ -61,13 +61,17 @@ are. Both machines simulate both players.
    - stalls (the sim doesn't step) and spends 30 frames **calibrating
      snapshots** (below);
    - sends READY (both players' loadouts, difficulty, stage, game build,
-     post-init RNG, shared resources) and waits for the peer's. Each player
-     picks their own character in their own menu; the guest's game adopts
-     the host's selection for P1 before the stage init runs (docs/04). A
-     mismatch means the games started differently → play the stage
+     post-init RNG, shared resources, the run's starting stock) and waits
+     for the peer's. Each player picks their own character in their own
+     menu; the guest's game adopts the host's selection for P1 before the
+     stage init runs (docs/04), waiting there for the host's committed
+     selection if the host hasn't started yet, and the host re-derives P2
+     at the barrier if the guest's final pick came late (docs/13). A
+     mismatch that can't be repaired (different stage, build, or the
+     host re-picked after the guest gave up waiting) → play the stage
      locally. Differing post-init RNG is logged as "stage init diverged"
      and the guest adopts the host's; the guest also adopts the host's
-     lives/bombs/power/score/graze.
+     lives/bombs/power/score/graze and run-start lives/bombs.
    - Times out after 2 minutes, or F10 leaves the lobby.
 4. **Running** — every simulation frame both players' inputs drive the
    step. Local input is sampled once per simulated frame, scheduled

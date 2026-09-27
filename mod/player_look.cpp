@@ -22,12 +22,10 @@ PlayerFn g_origDrawOverlay = nullptr;
 LookSettings g_settings;
 
 // The overlay mod's near-player fade (overlay/19, from th06_multi_net):
-// linear from 20% opacity at 50 units to fully opaque at 100.
+// linear from 15% opacity at 50 units to fully opaque at 100.
 const float kFadeNear = 50.0f;
 const float kFadeFar = 100.0f;
-const float kFadeNearOpacity = 0.20f;
-const float kHaloMaxAlpha = 0.6f;
-const float kHaloScale = 1.22f;
+const float kFadeNearOpacity = 0.15f;
 
 int PlayerIndex(const uint8_t* player) {
     if (player == Game::Player1()) return 0;
@@ -101,37 +99,39 @@ private:
     uint32_t m_saved;
 };
 
-// A halo behind the faded sprite: the main sprite drawn once more, scaled
-// up, in the player's color. The sprite pipeline has no depth test, so a
-// dark outline can't be cut out from under a translucent body (black copies
-// under or over it both read as a black silhouette, docs/11); a light halo
-// in the player's own color keeps the faded player visible on any
-// background instead. Placed like the player draw places the sprite.
-void DrawHalo(uint8_t* player, float alpha, uint32_t tint) {
-    uint8_t* vm = player + Game::kPlayerMainVm;
-    if (VmColor(vm) == 0) return;
-    float savedPos[3], savedScale[2];
-    memcpy(savedPos, vm + Game::kVmPos, sizeof(savedPos));
-    memcpy(savedScale, vm + Game::kVmScale, sizeof(savedScale));
-    uint32_t savedColor = VmColor(vm);
+// The player's shots fade with the player. Both player draw passes walk
+// the 80 shot slots (type 1 shots in the main pass, type 2 in the overlay
+// pass, docs/07) and draw each in-use slot's VM; their alpha is scaled for
+// the duration of the pass, colors untouched.
+class ShotFadeScope {
+public:
+    ShotFadeScope(uint8_t* player, float alpha) {
+        if (alpha >= 1.0f) return;
+        for (int i = 0; i < Game::kPlayerShotSlotCount; i++) {
+            uint8_t* slot = player + Game::kPlayerShotSlots + static_cast<uintptr_t>(i) * Game::kPlayerShotSlotStride;
+            uint8_t* vm = slot + Game::kShotSlotVm;
+            uint32_t color = VmColor(vm);
+            m_saved[i] = color;
+            if (*reinterpret_cast<uint16_t*>(slot + 0x10) == 0 || color == 0) continue;
+            uint32_t a = static_cast<uint32_t>(static_cast<float>(color >> 24) * alpha + 0.5f);
+            VmColor(vm) = ((a ? a : 1) << 24) | (color & 0xFFFFFF);
+            m_player = player;
+        }
+    }
+    ~ShotFadeScope() {
+        if (!m_player) return;
+        for (int i = 0; i < Game::kPlayerShotSlotCount; i++) {
+            uint8_t* slot = m_player + Game::kPlayerShotSlots + static_cast<uintptr_t>(i) * Game::kPlayerShotSlotStride;
+            VmColor(slot + Game::kShotSlotVm) = m_saved[i];
+        }
+    }
+    ShotFadeScope(const ShotFadeScope&) = delete;
+    ShotFadeScope& operator=(const ShotFadeScope&) = delete;
 
-    Game::Fn<SetViewFn>(Game::kFnSetPlayfieldView)(Game::At<void>(Game::kPlayfieldView), 0.0f,
-                                                  *Game::At<float>(Game::kConstHalf), 0);
-    uint32_t a = static_cast<uint32_t>(static_cast<float>(savedColor >> 24) * alpha + 0.5f);
-    VmColor(vm) = ((a ? a : 1) << 24) | (tint & 0xFFFFFF);
-    float* scale = reinterpret_cast<float*>(vm + Game::kVmScale);
-    scale[0] = savedScale[0] * kHaloScale;
-    scale[1] = savedScale[1] * kHaloScale;
-    float* pos = reinterpret_cast<float*>(vm + Game::kVmPos);
-    pos[0] = Pos(player)[0];
-    pos[1] = Pos(player)[1];
-    pos[2] = Game::kPlayerSpriteZ + g_settings.outlineDepthOffset;
-    Game::Fn<DrawVmFn>(Game::kFnDrawVm)(0, vm, 1);
-
-    VmColor(vm) = savedColor;
-    memcpy(vm + Game::kVmScale, savedScale, sizeof(savedScale));
-    memcpy(vm + Game::kVmPos, savedPos, sizeof(savedPos));
-}
+private:
+    uint8_t* m_player = nullptr;
+    uint32_t m_saved[Game::kPlayerShotSlotCount] = {};
+};
 
 uint64_t Detour_Draw(uint8_t* player, uint64_t secondArg) {
     int index = PlayerIndex(player);
@@ -140,12 +140,10 @@ uint64_t Detour_Draw(uint8_t* player, uint64_t secondArg) {
 
     float alpha = FadeFor(index);
     uint32_t tint = ColorOf(index);
-    if (g_settings.outline && alpha < 1.0f && Visible(player)) {
-        DrawHalo(player, (1.0f - alpha) / (1.0f - kFadeNearOpacity) * kHaloMaxAlpha, tint);
-    }
     VmColorScope body(player + Game::kPlayerMainVm, tint, alpha);
     VmColorScope left(player + Game::kPlayerOptionVmL, tint, alpha);
     VmColorScope right(player + Game::kPlayerOptionVmR, tint, alpha);
+    ShotFadeScope shots(player, alpha);
     return g_origDraw(player, secondArg);
 }
 
@@ -217,7 +215,11 @@ void UpdateAndDrawP2Ring(uint8_t* player) {
 uint64_t Detour_DrawOverlay(uint8_t* player, uint64_t secondArg) {
     int index = PlayerIndex(player);
     if (index >= 0 && CoopRules_IsDowned(player)) return 1;
-    uint64_t result = g_origDrawOverlay(player, secondArg);
+    uint64_t result = 0;
+    {
+        ShotFadeScope shots(player, index >= 0 && Player2_IsActive() ? FadeFor(index) : 1.0f);
+        result = g_origDrawOverlay(player, secondArg);
+    }
     if (index == 1 && Player2_IsActive()) UpdateAndDrawP2Ring(player);
     return result;
 }

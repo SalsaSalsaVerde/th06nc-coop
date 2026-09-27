@@ -25,8 +25,7 @@ bomb, **I** focus (or a second controller).
 - [ ] P2 focus: slower, orbs close in, and a **focus ring + hitbox square**
       appears on P2 (and on P1 when P1 focuses). Check the ring sits on the
       sprite, not offset.
-- [ ] Walk P2 onto P1: P2 fades to ~20% with a dark outline; P1 doesn't.
-      If anything flickers or draws wrong, retry with `[visual] outline=0`.
+- [ ] Walk P2 onto P1: P2 and P2's shots fade to ~15%; P1 doesn't.
 - [ ] Enemy bullets kill P2; P2 grazes (graze counter + sound); P2 dies and
       respawns with invulnerability.
 - [ ] Enemies aim at whoever is nearer.
@@ -68,7 +67,13 @@ bomb, **I** focus (or a second controller).
 - [ ] Host's panel changes (e.g. boss HP) appear greyed out on the guest.
 - [ ] Both start the same stage: brief "waiting for partner", then play.
       Host is P1, guest is P2, each with their own character and color.
-- [ ] `[netplay] mode=lockstep` first: play a stage; no `DESYNC` message.
+      Starting at different times is fine: whoever is second still gets
+      their final pick used (docs/13); a guest who starts first sees the
+      screen hold until the host starts (up to 20 s).
+- [x] `[netplay] mode=lockstep` first: play a stage; no `DESYNC` message.
+      (2026-09-27: two stages clean; a continue in stage 3 desynced —
+      fixed, docs/13.)
+- [ ] A continue online: both come back with the same lives, no `DESYNC`.
 - [ ] Then `mode=rollback`: feels responsive; still no desync; log's
       `Netplay stats` show rollbacks happening.
 - [ ] Deaths, bombs, boss kills, stage clears all match on both screens.

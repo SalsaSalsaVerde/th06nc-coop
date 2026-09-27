@@ -124,9 +124,7 @@ void Config_Load() {
     c.look.color = ReadColor(path, "color", c.look.color);
     c.look.p2Color = ReadColor(path, "p2_color", c.look.p2Color);
     c.look.proximityFade = ReadInt(path, "visual", "proximity_fade", 1) != 0;
-    c.look.outline = ReadInt(path, "visual", "outline", 1) != 0;
     c.look.focusRing = ReadInt(path, "visual", "focus_ring", 1) != 0;
-    c.look.outlineDepthOffset = ReadFloat(path, "visual", "outline_depth", c.look.outlineDepthOffset);
 
     char mode[32] = {};
     GetPrivateProfileStringA("netplay", "mode", "rollback", mode, sizeof(mode), path);
@@ -154,8 +152,8 @@ void Config_Load() {
            c.netplayRollback ? "rollback" : "lockstep", c.netplayInputDelay, c.netplayMaxRollback,
            c.coop.bossHpMultiplier, c.coop.invincible ? 1 : 0, c.coop.targeting,
            c.coop.sharedResources ? 1 : 0, c.coop.reviveSeconds);
-    ModLog("Config: visual color %06X p2_color %06X fade %d outline %d focus_ring %d", c.look.color,
-           c.look.p2Color, c.look.proximityFade ? 1 : 0, c.look.outline ? 1 : 0, c.look.focusRing ? 1 : 0);
+    ModLog("Config: visual color %06X p2_color %06X fade %d focus_ring %d", c.look.color,
+           c.look.p2Color, c.look.proximityFade ? 1 : 0, c.look.focusRing ? 1 : 0);
     ModLog("Config: start lives P1 %d P2 %d, bombs P1 %d P2 %d (-1 = game option)", c.coop.startLives[0],
            c.coop.startLives[1], c.coop.startBombs[0], c.coop.startBombs[1]);
 }
