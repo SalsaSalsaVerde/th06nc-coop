@@ -72,6 +72,12 @@ bool LooksLikeHeapPointer(uint64_t value) {
     return info.Type != MEM_IMAGE;
 }
 
+// Simulation-owned pointers into stable heap data: a difference there is
+// a desync to report, never a slot to stop restoring.
+bool IsGameCursor(uintptr_t rva) {
+    return rva == Game::kTimelineCursor || rva == Game::kTimelineJumpTarget;
+}
+
 bool IsVolatile(size_t i) {
     return (g_volatile[i >> 3] >> (i & 7)) & 1;
 }
@@ -204,9 +210,8 @@ void Snapshot_CalibrationSample() {
     DiffAgainstBaseline();
 }
 
-// Every 8-byte slot holding a heap address is excluded: the object behind
-// it isn't in the snapshot, so restoring the address can only be wrong.
-size_t ExcludeHeapPointerSlots() {
+// Every 8-byte slot holding a heap address. Unused: see EndCalibration.
+[[maybe_unused]] size_t ExcludeHeapPointerSlots() {
     size_t found = 0;
     const uint64_t* words = reinterpret_cast<const uint64_t*>(g_dataBase);
     size_t count = g_dataSize / 8;
@@ -221,8 +226,12 @@ size_t ExcludeHeapPointerSlots() {
 void Snapshot_EndCalibration() {
     if (!g_calibrating) return;
     g_calibrating = false;
-    size_t pointers = ExcludeHeapPointerSlots();
-    ModLog("Snapshot: %zu heap-pointer slots excluded from restores", pointers);
+    // Not ExcludeHeapPointerSlots(): the stage timeline's cursor is a heap
+    // pointer (into the loaded ECL) and must be restored, or a rewound
+    // stage re-runs with its cursor already past the records its clock
+    // says are due (docs/11). Library pointer blocks are denylisted by
+    // address instead, and the sync test learns any slot that
+    // re-simulates to a different allocation.
     BuildRestoreRanges();
 }
 
@@ -320,7 +329,7 @@ size_t Snapshot_CompareLive(int frame, int maxReport, bool learnExtraDiffs) {
                 uint64_t liveWord, savedWord;
                 memcpy(&liveWord, g_dataBase + word, 8);
                 memcpy(&savedWord, slot->data + word, 8);
-                if (LooksLikeHeapPointer(liveWord) && LooksLikeHeapPointer(savedWord)) {
+                if (LooksLikeHeapPointer(liveWord) && LooksLikeHeapPointer(savedWord) && !IsGameCursor(dataRva + word)) {
                     if (!IsVolatile(word)) {
                         MarkVolatile(word, word + 8);
                         pointerSlots++;
