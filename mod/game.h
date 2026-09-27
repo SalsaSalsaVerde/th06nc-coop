@@ -89,6 +89,8 @@ const uintptr_t kPlayerFocused = 0x785C;       // bool, focus held (set every up
 
 // Sprite VM (0x120 bytes) fields read by the sprite draw FUN_140006de0 ->
 // FUN_140003c90 (docs/07).
+const size_t kVmSize = 0x120;
+const uintptr_t kShotSlotVm = 0x8;             // a shot slot's VM (the draw walks slot+8, stride 0x170)
 const uintptr_t kVmFlags = 0xC4;               // u32: drawn only if bits 1 and 2 are both set
 const uintptr_t kVmPos = 0xC8;                 // float[3]
 const uintptr_t kVmScale = 0xE4;               // float[2]: x and y scale of the sprite

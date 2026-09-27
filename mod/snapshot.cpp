@@ -101,6 +101,18 @@ void MarkFixedDenylist() {
     for (const Game::RvaRange& range : Game::kNeverRestore) {
         MarkVolatileRva(range.begin, range.end);
     }
+    // Player 1's sprite VMs (main sprite, the two orbs, each shot's): pure
+    // animation state whose scripts draw on the animation manager's own
+    // random source (a heap object outside the snapshot), so re-simulated
+    // frames differ there cosmetically (docs/11). P2's are learned.
+    uintptr_t p1 = Game::kPlayerBase;
+    MarkVolatileRva(p1 + Game::kPlayerMainVm, p1 + Game::kPlayerMainVm + Game::kVmSize);
+    MarkVolatileRva(p1 + Game::kPlayerOptionVmL, p1 + Game::kPlayerOptionVmL + Game::kVmSize);
+    MarkVolatileRva(p1 + Game::kPlayerOptionVmR, p1 + Game::kPlayerOptionVmR + Game::kVmSize);
+    for (int i = 0; i < Game::kPlayerShotSlotCount; i++) {
+        uintptr_t slot = p1 + Game::kPlayerShotSlots + static_cast<uintptr_t>(i) * Game::kPlayerShotSlotStride;
+        MarkVolatileRva(slot + Game::kShotSlotVm, slot + Game::kShotSlotVm + Game::kVmSize);
+    }
 }
 
 void BuildRestoreRanges() {
