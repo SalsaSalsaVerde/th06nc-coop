@@ -1,0 +1,12 @@
+mod/build/
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.dll
+research/
+mod/installer/build/
+*.res
+*.exe
+__pycache__/

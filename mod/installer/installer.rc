@@ -1,0 +1,7 @@
+#include "resource.h"
+
+// Both files are baked in at build time, so the installer is one
+// self-contained .exe. build.ps1 checks the DLL exists first -- build the
+// mod (mod\build.ps1) before the installer.
+IDR_MOD_DLL RCDATA "..\\build\\steam_api64.dll"
+IDR_EXAMPLE_INI RCDATA "..\\th06nc_native_coop.example.ini"
