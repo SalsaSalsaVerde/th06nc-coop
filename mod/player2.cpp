@@ -625,6 +625,12 @@ bool GrazeByPlayer2(uint8_t* bullet) {
 // Cancelled bullets (state 5) are skipped, so a bullet already handled in
 // the native pass isn't counted twice.
 uint64_t Detour_BulletUpdate(int32_t* bulletManager) {
+    static bool s_loggedBase = false;
+    if (!s_loggedBase) {
+        s_loggedBase = true;
+        ModLog("Diag: bullet manager at %p (rva 0x%llX)", bulletManager,
+               static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(bulletManager) - Game::Base()));
+    }
     uint64_t result = g_origBulletUpdate(bulletManager);
     if (!g_active) return result;
 
