@@ -105,7 +105,7 @@ void MarkFixedDenylist() {
     // animation state whose scripts draw on the animation manager's own
     // random source (a heap object outside the snapshot), so re-simulated
     // frames differ there cosmetically (docs/11). P2's are learned.
-    uintptr_t p1 = Game::kPlayerBase;
+    uintptr_t p1 = Game::kPlayerStruct;
     MarkVolatileRva(p1 + Game::kPlayerMainVm, p1 + Game::kPlayerMainVm + Game::kVmSize);
     MarkVolatileRva(p1 + Game::kPlayerOptionVmL, p1 + Game::kPlayerOptionVmL + Game::kVmSize);
     MarkVolatileRva(p1 + Game::kPlayerOptionVmR, p1 + Game::kPlayerOptionVmR + Game::kVmSize);
