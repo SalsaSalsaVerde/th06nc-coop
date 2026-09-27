@@ -110,6 +110,11 @@ void Config_Load() {
     c.coop.startBombs[1] = static_cast<int8_t>(ReadInt(path, "coop", "p2_start_bombs", -1));
     c.coop.startPower = static_cast<int16_t>(ReadInt(path, "coop", "start_power", -1));
     c.coop.startStage = static_cast<int8_t>(ReadInt(path, "coop", "start_stage", 1));
+    char startPoint[32] = {};
+    GetPrivateProfileStringA("coop", "start_point", "stage", startPoint, sizeof(startPoint), path);
+    if (_stricmp(startPoint, "midboss") == 0) c.coop.startPoint = kStartAtMidboss;
+    else if (_stricmp(startPoint, "boss") == 0) c.coop.startPoint = kStartAtBoss;
+    else c.coop.startPoint = kStartAtStage;
     char targeting[32] = {};
     GetPrivateProfileStringA("coop", "targeting", "nearest", targeting, sizeof(targeting), path);
     if (_stricmp(targeting, "host") == 0) c.coop.targeting = kTargetHost;

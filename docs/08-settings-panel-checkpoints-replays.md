@@ -67,7 +67,7 @@ The flags that tell the run modes apart (new RE, docs in `game.h`):
 | `0x53D414` | option `0xC6DFDB` / replay header byte 6 == 1 | a mode where deaths don't cost lives and power never drops below 8 (probably New Classic's training option) |
 | `0xC6DFD4/5` | options menu | the game's starting lives / bombs options |
 
-Not built: **midboss and stage-spell checkpoints** (e.g. stage 4's books).
+Midboss and boss start points came later (docs/12). Not built: **individual stage-spell checkpoints** (e.g. stage 4's books).
 Those need jumping the stage's enemy timeline (ECL) and background scroll
 to a point mid-stage, which is new RE. Two leads for whoever picks it up:
 

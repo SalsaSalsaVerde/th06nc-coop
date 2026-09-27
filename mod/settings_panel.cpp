@@ -35,6 +35,7 @@ const char* kCharacterNames[] = { "SAME AS P1", "REIMU A", "REIMU B", "MARISA A"
 
 enum Item {
     kItemStartStage,
+    kItemStartPoint,
     kItemBossHp,
     kItemInvincible,
     kItemTargeting,
@@ -153,6 +154,12 @@ void Describe(int item, char* label, size_t labelSize, char* value, size_t value
             snprintf(label, labelSize, "START THE RUN AT");
             snprintf(value, valueSize, "STAGE %d", s.startStage);
             break;
+        case kItemStartPoint: {
+            const char* names[] = { "STAGE START", "MIDBOSS", "BOSS" };
+            snprintf(label, labelSize, "START AT");
+            snprintf(value, valueSize, "%s", names[s.startPoint >= 0 && s.startPoint <= kStartAtBoss ? s.startPoint : 0]);
+            break;
+        }
         case kItemStartPower:
             snprintf(label, labelSize, "START POWER");
             if (s.startPower < 0) snprintf(value, valueSize, "GAME'S (0)");
@@ -236,6 +243,7 @@ void Change(int item, int dir) {
             break;
         }
         case kItemStartStage: s.startStage = static_cast<int8_t>(StepInt(s.startStage, dir, 1, 6)); break;
+        case kItemStartPoint: s.startPoint = static_cast<int8_t>(StepInt(s.startPoint, dir, 0, kStartAtBoss)); break;
         case kItemStartPower: s.startPower = StepPower(s.startPower, dir); break;
         case kItemInvincible: s.invincible = !s.invincible; break;
         case kItemTargeting: s.targeting = static_cast<uint8_t>(StepInt(s.targeting, dir, 0, kTargetAlternate)); break;
@@ -295,6 +303,8 @@ void Save() {
     WriteInt("coop", "p2_start_bombs", s.startBombs[1]);
     WriteInt("coop", "start_power", s.startPower);
     WriteInt("coop", "start_stage", s.startStage);
+    const char* points[] = { "stage", "midboss", "boss" };
+    WriteString("coop", "start_point", points[s.startPoint >= 0 && s.startPoint <= kStartAtBoss ? s.startPoint : 0]);
     snprintf(buf, sizeof(buf), "%06X", look.color);
     WriteString("visual", "color", buf);
     snprintf(buf, sizeof(buf), "%06X", look.p2Color);

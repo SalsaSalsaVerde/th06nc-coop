@@ -17,6 +17,13 @@ struct CoopSettings {
     int8_t startBombs[2] = { -1, -1 };
     int16_t startPower = -1; // power (0-128) both players start a run with; -1 = the game's (0)
     int8_t startStage = 1;   // checkpoint: a new co-op run starts at this stage (1-6)
+    int8_t startPoint = 0;   // CoopStartPoint: where in that stage the run starts
+};
+
+enum CoopStartPoint : int8_t {
+    kStartAtStage = 0,   // the stage's beginning
+    kStartAtMidboss = 1, // the timeline record that spawns the first enemy the timeline then waits for
+    kStartAtBoss = 2,    // the game's own boss marker
 };
 
 bool CoopSettings_Equal(const CoopSettings& a, const CoopSettings& b);
@@ -60,6 +67,11 @@ void CoopRules_ResetRun();
 // For a fresh co-op run from the menu (not a replay or practice), starts it
 // at the checkpoint stage instead of stage 1 (docs/08).
 void CoopRules_OnSceneInit(bool coopActive);
+
+// Call right after the gameplay scene init returned: applies the start
+// point (midboss/boss) to a fresh run's first stage by pointing the game's
+// own timeline jump at the chosen record (docs/12).
+void CoopRules_AfterSceneInit();
 
 // Every native player-death path (bullets, lasers, enemy contact) only
 // kills a player whose state is 0; in state 3 (bombing) touching bullets are

@@ -933,7 +933,9 @@ uint64_t Detour_SceneInit(void* scene) {
         *Game::At<uint32_t>(Game::kRngCounter) = 0;
         ModLog("Netplay: gameplay scene init, stage seed %04X for session %u", seed, g_session + 1);
     }
-    return g_origSceneInit(scene);
+    uint64_t result = g_origSceneInit(scene);
+    CoopRules_AfterSceneInit();
+    return result;
 }
 
 // ---- Player 2 lifecycle ---------------------------------------------------

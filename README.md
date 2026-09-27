@@ -33,6 +33,10 @@ are the research record this builds on; referenced here as `overlay/NN`).
   settings panel (F8), stage checkpoints, replay safety
 - `docs/09-installer.md` — the single-file installer
 - `docs/10-test-checklist.md` — what to check in the game, in order
+- `docs/11-first-live-test-fixes.md` — what the first live tests found and
+  how it was fixed
+- `docs/12-stage-timeline-and-start-points.md` — the stage timeline;
+  midboss / boss start points
 
 ## Install
 

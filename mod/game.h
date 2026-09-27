@@ -175,6 +175,24 @@ const uintptr_t kRngCounter = 0xABAE60;        // u32
 const uintptr_t kReplayFlag = 0x53D3DC;        // u8: a replay is playing back
 const uintptr_t kPracticeFlag = 0x53D404;      // u8: stage practice
 const uintptr_t kSpellPracticeFlag = 0x53D405; // u8: spell practice
+// Stage timeline (docs/12): the ECL's timeline is a list of records of
+// shorts {time, arg, opcode, size, ...}; time < 0 ends it. The enemy
+// manager (0xAEE0B0, entities at +8) ticks it in FUN_140037b80 against the
+// stage clock, running records whose time equals the clock. Setting the
+// jump flag makes the next tick continue from the jump target record with
+// the clock set to that record's time (the game's own "skip to the boss";
+// the scene init points the target at the first opcode-0xD record).
+const uintptr_t kTimelineStart = 0xABAD90;     // const short*: first record
+const uintptr_t kTimelineJumpTarget = 0xABADA8; // short*: record to continue from, or null
+const uintptr_t kTimelineJumpFlag = 0xABADB0;  // u8: apply the jump at the next tick
+const uintptr_t kEnemyManager = 0xAEE0B0;
+const uintptr_t kStageClock = 0xBFA16C;        // int32: enemy manager +0x10C0BC
+const uintptr_t kTimelineCursor = 0xBFA1D8;    // short*: enemy manager +0x10C128
+const int16_t kTimelineOpSpawnLast = 7;        // opcodes 0-7 spawn an enemy running sub `arg`
+const int16_t kTimelineOpBossIntro = 8;        // boss dialogue `arg`
+const int16_t kTimelineOpWaitEnemy = 0xC;      // hold the clock until enemy `arg` is gone
+const int16_t kTimelineOpBossMarker = 0xD;     // the game's own jump target
+
 const uintptr_t kGameOverFlag = 0x53D401;      // u8: set by a player's final death, cleared by continuing
 const uintptr_t kRngSeed = 0xABAE64;           // u16
 

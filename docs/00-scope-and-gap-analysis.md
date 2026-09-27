@@ -264,7 +264,7 @@ decision.
 | Hue color per player | built as a multiply tint (docs/07) |
 | Other player translucent + outlined near you | built (docs/07) |
 | Showing the other player's focus | built: focus ring + hitbox (docs/07); the native orbs also close in |
-| Checkpoints | stage checkpoints built (docs/08); midboss / stage-spell checkpoints not built (leads in docs/08) |
+| Checkpoints | stage checkpoints built and tested (docs/08); midboss and boss start points built, untested (docs/12); individual stage spells not built |
 
 ## Milestone order
 

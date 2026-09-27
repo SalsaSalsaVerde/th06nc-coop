@@ -221,7 +221,7 @@ bool CoopSettings_Equal(const CoopSettings& a, const CoopSettings& b) {
            a.sharedResources == b.sharedResources && a.reviveSeconds == b.reviveSeconds &&
            a.startLives[0] == b.startLives[0] && a.startLives[1] == b.startLives[1] &&
            a.startBombs[0] == b.startBombs[0] && a.startBombs[1] == b.startBombs[1] &&
-           a.startPower == b.startPower && a.startStage == b.startStage;
+           a.startPower == b.startPower && a.startStage == b.startStage && a.startPoint == b.startPoint;
 }
 
 void CoopRules_SetSettings(const CoopSettings& settings) {
@@ -237,6 +237,7 @@ void CoopRules_SetSettings(const CoopSettings& settings) {
     if (g_settings.reviveSeconds > 600) g_settings.reviveSeconds = 600;
     if (g_settings.startPower < -1 || g_settings.startPower > 128) g_settings.startPower = -1;
     if (g_settings.startStage < 1 || g_settings.startStage > 6) g_settings.startStage = 1;
+    if (g_settings.startPoint < 0 || g_settings.startPoint > kStartAtBoss) g_settings.startPoint = kStartAtStage;
     if (g_settings.targeting > kTargetAlternate) g_settings.targeting = kTargetNearest;
 }
 
@@ -277,7 +278,10 @@ int CoopRules_ReviveFramesLeft() {
     return g_settings.reviveSeconds * 60 - g_state.reviveTimer;
 }
 
+bool g_startPointPending = false;
+
 void CoopRules_OnSceneInit(bool coopActive) {
+    g_startPointPending = false;
     int32_t* stage = Game::At<int32_t>(Game::kStageNumber);
     uint8_t replay = *Game::At<uint8_t>(Game::kReplayFlag);
     uint8_t practice = *Game::At<uint8_t>(Game::kPracticeFlag);
@@ -285,9 +289,10 @@ void CoopRules_OnSceneInit(bool coopActive) {
     uint8_t continues = *Game::At<uint8_t>(Game::kContinuesUsed);
     uint32_t score = *Game::At<uint32_t>(Game::kScore);
     ModLog("CoopRules: scene init -- stage index %d, replay %d, practice %d, spell practice %d, continues %d, score %u,"
-           " checkpoint stage %d, co-op %d",
-           *stage, replay, practice, spell, continues, score, g_settings.startStage, coopActive ? 1 : 0);
-    if (!coopActive || g_settings.startStage <= 1) return;
+           " checkpoint stage %d point %d, co-op %d",
+           *stage, replay, practice, spell, continues, score, g_settings.startStage, g_settings.startPoint,
+           coopActive ? 1 : 0);
+    if (!coopActive || (g_settings.startStage <= 1 && g_settings.startPoint == kStartAtStage)) return;
 
     // Only a fresh normal run starts at stage index 0 with nothing used; a
     // continue restarts the current stage with the same index.
@@ -302,8 +307,53 @@ void CoopRules_OnSceneInit(bool coopActive) {
         ModLog("CoopRules: checkpoint not applied -- %s", why);
         return;
     }
-    *stage = g_settings.startStage - 1;
-    ModLog("CoopRules: checkpoint -- the run starts at stage %d", g_settings.startStage);
+    if (g_settings.startStage > 1) {
+        *stage = g_settings.startStage - 1;
+        ModLog("CoopRules: checkpoint -- the run starts at stage %d", g_settings.startStage);
+    }
+    g_startPointPending = g_settings.startPoint != kStartAtStage;
+}
+
+// The timeline record to continue from for the midboss start: the last
+// enemy spawn before the first "wait for enemy" record that comes before
+// the boss dialogue. Null if the stage has no such section.
+const int16_t* FindMidbossRecord() {
+    const int16_t* record = *Game::At<const int16_t*>(Game::kTimelineStart);
+    if (!record) return nullptr;
+    const int16_t* lastSpawn = nullptr;
+    int scanned = 0;
+    for (; record[0] >= 0 && scanned < 4096; scanned++) {
+        int16_t opcode = record[2];
+        if (opcode == Game::kTimelineOpBossIntro || opcode == Game::kTimelineOpBossMarker) return nullptr;
+        if (opcode == Game::kTimelineOpWaitEnemy) return lastSpawn;
+        if (opcode >= 0 && opcode <= Game::kTimelineOpSpawnLast) lastSpawn = record;
+        if (record[3] <= 0) return nullptr;
+        record = reinterpret_cast<const int16_t*>(reinterpret_cast<const uint8_t*>(record) + record[3]);
+    }
+    return nullptr;
+}
+
+void CoopRules_AfterSceneInit() {
+    if (!g_startPointPending) return;
+    g_startPointPending = false;
+    const int16_t** target = Game::At<const int16_t*>(Game::kTimelineJumpTarget);
+    const int16_t* record = nullptr;
+    const char* name = "";
+    if (g_settings.startPoint == kStartAtBoss) {
+        record = *target; // set by the scene init: the first boss marker
+        name = "boss";
+    } else if (g_settings.startPoint == kStartAtMidboss) {
+        record = FindMidbossRecord();
+        name = "midboss";
+    }
+    if (!record) {
+        ModLog("CoopRules: start point '%s' -- this stage's timeline has no such section, starting normally", name);
+        return;
+    }
+    *target = record;
+    *Game::At<uint8_t>(Game::kTimelineJumpFlag) = 1;
+    ModLog("CoopRules: start point '%s' -- timeline jumps to time %d (opcode %d, sub %d)", name, record[0],
+           record[2], record[1]);
 }
 
 void CoopRules_ResetRun() {
