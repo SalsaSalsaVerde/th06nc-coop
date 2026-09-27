@@ -237,6 +237,17 @@ const RvaRange kNeverRestore[] = {
     { 0x5FD000, 0x5FE800 },
 };
 
+// Simulation state that drawing also writes: the learning that excludes
+// draw-time writes must never drop these, or a rewound simulation reads
+// present-day values (docs/11). The screen shake: offsets, timer and
+// amplitude, updated during the draw pass but consulted by the simulation
+// when it draws random numbers for the shake.
+const RvaRange kAlwaysRestore[] = {
+    { 0x53CAC0, 0x53CAD0 }, // camera / shake offsets
+    { 0x549F70, 0x549F80 }, // shake amplitude
+    { 0xC6E388, 0xC6E38C }, // shake counter
+};
+
 // Entity table (overlay/24, overlay/44) and item pool (overlay/60).
 const uintptr_t kEntityTable = 0xAEE0B8;
 const int kEntitySlots = 256;

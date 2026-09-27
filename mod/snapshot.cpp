@@ -63,7 +63,7 @@ bool EnsureAllocated() {
 // outside this DLL): a heap object the snapshot doesn't cover. Restoring
 // such a slot only ever puts back a stale address (docs/11).
 bool LooksLikeHeapPointer(uint64_t value) {
-    if (value < 0x10000 || value >= 0x00007FF000000000ull) return false;
+    if (value < 0x10000 || value >= 0x00007FF000000000ull || (value & 0xF) != 0) return false; // allocations are 16-aligned
     uintptr_t base = Game::Base();
     if (value >= base && value < base + Game::kExpectedSizeOfImage) return false;
     MEMORY_BASIC_INFORMATION info;
@@ -82,8 +82,17 @@ bool IsVolatile(size_t i) {
     return (g_volatile[i >> 3] >> (i & 7)) & 1;
 }
 
+bool AlwaysRestored(size_t i) {
+    uintptr_t rva = reinterpret_cast<uintptr_t>(g_dataBase) - Game::Base() + i;
+    for (const Game::RvaRange& range : Game::kAlwaysRestore) {
+        if (rva >= range.begin && rva < range.end) return true;
+    }
+    return false;
+}
+
 void MarkVolatile(size_t begin, size_t end) {
     for (size_t i = begin; i < end && i < g_dataSize; i++) {
+        if (AlwaysRestored(i)) continue;
         g_volatile[i >> 3] |= static_cast<uint8_t>(1u << (i & 7));
     }
 }
