@@ -5,6 +5,7 @@
 #include "player2.h"
 
 #include <cmath>
+#include <cstdio>
 
 namespace {
 
@@ -20,10 +21,13 @@ struct RulesState {
     int32_t lastScaledMaxHp; // boss max HP after our last scaling; -1 = none
     uint8_t downed[2];       // P1, P2
     uint8_t lastGameOver;
+    uint8_t lastContinues;   // the game's continues-used counter, last frame
     int32_t reviveTimer;
 };
-RulesState g_state = { -1, { 0, 0 }, 0, 0 };
+RulesState g_state = { -1, { 0, 0 }, 0, 0, 0 };
 int g_bombLogsLeft = 20;
+int g_downedLogsLeft = 30;
+int g_downedLogTimer = 0;
 
 int32_t* EntityInt(uint8_t* slot, uintptr_t offset) {
     return reinterpret_cast<int32_t*>(slot + offset);
@@ -130,9 +134,15 @@ void Revive(int index, uint8_t lives) {
 // Runs once per frame, from P1's update call (P1's node always exists).
 void TickRevive() {
     uint8_t gameOver = GameOverFlag();
-    if (g_state.lastGameOver && !gameOver) {
+    uint8_t continues = *Game::At<uint8_t>(Game::kContinuesUsed);
+    bool continued = continues > g_state.lastContinues;
+    g_state.lastContinues = continues;
+    if (continued) ModLog("CoopRules: continue used (%d so far), lives now %d", continues, *Game::At<uint8_t>(Game::kLives));
+    if (continued || (g_state.lastGameOver && !gameOver)) {
         // Continued after a game over: everyone comes back with the starting
-        // lives the continue just handed out.
+        // lives the continue just handed out. (The game-over flag alone
+        // isn't a reliable signal: the game may clear it before P1's update
+        // sees it set. The continues counter is, docs/11.)
         // The respawn branch spends one life, so hand out one more.
         uint8_t lives = static_cast<uint8_t>(*Game::At<uint8_t>(Game::kLives) + 1);
         for (int i = 0; i < 2; i++) {
@@ -163,6 +173,13 @@ uint64_t Detour_PlayerUpdate(uint8_t* player, uint64_t secondArg) {
     int index = PlayerIndex(player);
     if (index < 0) return g_origPlayerUpdate(player, secondArg);
     if (index == 0) TickRevive();
+    // Diagnostic (docs/11): the game-over flag as each downed player sees it.
+    if (g_state.downed[index] && g_downedLogsLeft > 0 && (g_downedLogTimer++ % 120) == 0) {
+        g_downedLogsLeft--;
+        ModLog("Diag: P%d downed -- game over flag %d, continues %d, lives %d, score %u", index + 1, GameOverFlag(),
+               *Game::At<uint8_t>(Game::kContinuesUsed), *Game::At<uint8_t>(Game::kLives),
+               *Game::At<uint32_t>(Game::kScore));
+    }
     if (g_state.downed[index]) {
         ParkDowned(player);
         return 1;
@@ -333,7 +350,33 @@ const int16_t* FindMidbossRecord() {
     return nullptr;
 }
 
+// Logs the stage's timeline (time/opcode/arg per record) once per stage,
+// to pick start points from real data (docs/12).
+void LogTimeline() {
+    const int16_t* record = *Game::At<const int16_t*>(Game::kTimelineStart);
+    if (!record) return;
+    char line[256] = {};
+    size_t len = 0;
+    int count = 0;
+    for (int scanned = 0; record[0] >= 0 && scanned < 2000; scanned++) {
+        int n = snprintf(line + len, sizeof(line) - len, " %d:%d/%d", record[0], record[2], record[1]);
+        if (n < 0 || len + n >= sizeof(line) - 24) {
+            ModLog("Timeline:%s", line);
+            len = 0;
+            line[0] = '\0';
+            n = snprintf(line, sizeof(line), " %d:%d/%d", record[0], record[2], record[1]);
+        }
+        len += n;
+        count++;
+        if (record[3] <= 0) break;
+        record = reinterpret_cast<const int16_t*>(reinterpret_cast<const uint8_t*>(record) + record[3]);
+    }
+    if (len) ModLog("Timeline:%s", line);
+    ModLog("Timeline: %d records (time:opcode/arg; opcodes 0-7 spawn sub, 8 boss intro, 9 wait dialogue, 12 wait enemy, 13 boss marker)", count);
+}
+
 void CoopRules_AfterSceneInit() {
+    LogTimeline();
     if (!g_startPointPending) return;
     g_startPointPending = false;
     const int16_t** target = Game::At<const int16_t*>(Game::kTimelineJumpTarget);
@@ -362,6 +405,7 @@ void CoopRules_ResetRun() {
     g_state.downed[1] = 0;
     g_state.reviveTimer = 0;
     g_state.lastGameOver = 0;
+    g_state.lastContinues = *Game::At<uint8_t>(Game::kContinuesUsed);
 }
 
 InvincibleScope::InvincibleScope(uint8_t* player) {
