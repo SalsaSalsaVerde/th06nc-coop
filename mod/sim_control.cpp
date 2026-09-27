@@ -31,6 +31,27 @@ uint16_t g_rngSeedAfterStep = 0;
 uint32_t g_rngCounterAfterStep = 0;
 bool g_rngSaved = false;
 
+// The screen shake task lives on the heap (docs/11), so a rewound
+// simulation can't put it back where it was; if it also drew from the
+// game's RNG, every rollback would move the sequence. It draws from a
+// private one instead: the game's RNG state is swapped out around its tick.
+using TaskTickFn = uint64_t (*)(void* arg);
+TaskTickFn g_origScreenShakeTick = nullptr;
+uint16_t g_shakeSeed = 0x1234;
+
+uint64_t Detour_ScreenShakeTick(void* arg) {
+    uint16_t* seed = Game::At<uint16_t>(Game::kRngSeed);
+    uint32_t* counter = Game::At<uint32_t>(Game::kRngCounter);
+    uint16_t savedSeed = *seed;
+    uint32_t savedCounter = *counter;
+    *seed = g_shakeSeed;
+    uint64_t result = g_origScreenShakeTick(arg);
+    g_shakeSeed = *seed;
+    *seed = savedSeed;
+    *counter = savedCounter;
+    return result;
+}
+
 uint64_t Detour_SimStep(uint32_t* outCode) {
     uint16_t* seed = Game::At<uint16_t>(Game::kRngSeed);
     uint32_t* counter = Game::At<uint32_t>(Game::kRngCounter);
@@ -86,6 +107,8 @@ bool SimControl_Install() {
                         reinterpret_cast<void**>(&g_origSoundFlush), "SoundFlush", /*returnsValue=*/false);
     ok &= Hooks_Install(Game::kFnPlayBgm, reinterpret_cast<void*>(&Detour_PlayBgm),
                         reinterpret_cast<void**>(&g_origPlayBgm), "PlayBgm");
+    ok &= Hooks_Install(Game::kFnScreenShakeTick, reinterpret_cast<void*>(&Detour_ScreenShakeTick),
+                        reinterpret_cast<void**>(&g_origScreenShakeTick), "ScreenShakeTick");
     return ok;
 }
 

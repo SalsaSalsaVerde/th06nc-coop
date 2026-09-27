@@ -235,19 +235,23 @@ const RvaRange kNeverRestore[] = {
     // play. Restoring stale ones crashed the mixer (docs/11). Every code
     // reference into this block comes from library functions.
     { 0x5FD000, 0x5FE800 },
-};
-
-// Simulation state that drawing also writes: the learning that excludes
-// draw-time writes must never drop these, or a rewound simulation reads
-// present-day values (docs/11). The screen shake: offsets, timer and
-// amplitude, updated during the draw pass but consulted by the simulation
-// when it draws random numbers for the shake.
-const RvaRange kAlwaysRestore[] = {
+    // More library state (referenced only by library code, per
+    // tools/ghidra_scripts/MapLibraryData): counters the sync test saw
+    // advance with sound playback that a muted re-simulation skips.
+    { 0x7E0098, 0x7E3D6C },
+    { 0x7E60B0, 0x7FAACC },
+    // Written by the heap-resident screen-shake task: cosmetic.
     { 0x53CAC0, 0x53CAD0 }, // camera / shake offsets
     { 0x549F70, 0x549F80 }, // shake amplitude
     { 0xC6E388, 0xC6E38C }, // shake counter
 };
 
+// The screen shake (docs/11): FUN_140077890 allocates a state block and a
+// task node (priority 0xE) on the heap and inserts the node into the update
+// list; the node's tick writes the camera offsets from random numbers. A
+// snapshot can't restore either allocation, so the tick is given a private
+// random sequence (sim_control.cpp) and its outputs are never restored.
+const uintptr_t kFnScreenShakeTick = 0x77AB0;
 // Entity table (overlay/24, overlay/44) and item pool (overlay/60).
 const uintptr_t kEntityTable = 0xAEE0B8;
 const int kEntitySlots = 256;

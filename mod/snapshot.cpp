@@ -82,17 +82,8 @@ bool IsVolatile(size_t i) {
     return (g_volatile[i >> 3] >> (i & 7)) & 1;
 }
 
-bool AlwaysRestored(size_t i) {
-    uintptr_t rva = reinterpret_cast<uintptr_t>(g_dataBase) - Game::Base() + i;
-    for (const Game::RvaRange& range : Game::kAlwaysRestore) {
-        if (rva >= range.begin && rva < range.end) return true;
-    }
-    return false;
-}
-
 void MarkVolatile(size_t begin, size_t end) {
     for (size_t i = begin; i < end && i < g_dataSize; i++) {
-        if (AlwaysRestored(i)) continue;
         g_volatile[i >> 3] |= static_cast<uint8_t>(1u << (i & 7));
     }
 }
