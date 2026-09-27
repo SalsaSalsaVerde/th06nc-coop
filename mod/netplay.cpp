@@ -792,7 +792,7 @@ void RunSyncCheck() {
     }
 
     g_syncTestStats.checks++;
-    size_t differing = Snapshot_CompareLive(g_frame, g_syncTestStats.failures < 5 ? 12 : 0);
+    size_t differing = Snapshot_CompareLive(g_frame, g_syncTestStats.failures < 5 ? 12 : 0, true);
     if (differing == 0) {
         if (g_syncTestStats.checks == 1 || g_syncTestStats.checks % 100 == 0) {
             ModLog("SyncTest: frame %d OK (%d checks so far)", g_frame, g_syncTestStats.checks);
@@ -1060,6 +1060,8 @@ bool Netplay_Install() {
     void* rulesState = CoopRules_StateRegion(&rulesSize);
     Snapshot_AddRegion(rulesState, rulesSize);
     Snapshot_AddIndirectRegion(Game::kGuiObjectPtr, Game::kGuiObjectSize);
+    // The GUI's frame-rate readout (float, real time), seen by the sync test.
+    Snapshot_MarkExtraVolatile(2, Game::kGuiFpsValue, Game::kGuiFpsValue + 4);
 
     Player2Listener listener;
     listener.forceSpawn = &ForceSpawnPlayer2;

@@ -22,11 +22,27 @@ bool g_muted = false;
 uint32_t g_forcedP1 = 0;
 uint32_t g_forcedP2 = 0;
 
+// The draw pass takes random numbers from the game's one RNG (the screen
+// shake after a bomb, for one), so a frame that is re-simulated without
+// drawing would leave the RNG elsewhere than the live frame did, and two
+// machines would drift apart with every rollback (docs/11). The RNG is put
+// back to where the last simulation step left it before the next one runs.
+uint16_t g_rngSeedAfterStep = 0;
+uint32_t g_rngCounterAfterStep = 0;
+bool g_rngSaved = false;
+
 uint64_t Detour_SimStep(uint32_t* outCode) {
-    if (g_driver) {
-        return g_driver(outCode);
+    uint16_t* seed = Game::At<uint16_t>(Game::kRngSeed);
+    uint32_t* counter = Game::At<uint32_t>(Game::kRngCounter);
+    if (g_rngSaved) {
+        *seed = g_rngSeedAfterStep;
+        *counter = g_rngCounterAfterStep;
     }
-    return g_origSimStep(outCode);
+    uint64_t result = g_driver ? g_driver(outCode) : g_origSimStep(outCode);
+    g_rngSeedAfterStep = *seed;
+    g_rngCounterAfterStep = *counter;
+    g_rngSaved = true;
+    return result;
 }
 
 // The per-frame supervisor task does `previous = current; current = poll();`.

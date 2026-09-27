@@ -25,6 +25,11 @@ void Snapshot_AddRegion(void* ptr, size_t size);
 // A heap block reached through a pointer global in the game.
 void Snapshot_AddIndirectRegion(uintptr_t pointerRva, size_t size);
 
+// Bytes [begin, end) of the region added `regionIndex`-th are neither
+// restored nor compared (real-time state inside an otherwise simulation-
+// owned object, docs/11).
+void Snapshot_MarkExtraVolatile(size_t regionIndex, size_t begin, size_t end);
+
 void Snapshot_BeginCalibration();
 void Snapshot_CalibrationSample(); // once per rendered frame while stalled
 void Snapshot_EndCalibration();
@@ -44,4 +49,6 @@ void Snapshot_Clear();
 // Compares live memory against a saved frame over exactly the bytes a
 // restore would write. Only meaningful within one process (pointers match).
 // Logs up to `maxReport` differing addresses; returns how many bytes differ.
-size_t Snapshot_CompareLive(int frame, int maxReport);
+// With `learnExtraDiffs`, differing bytes of the extra regions are marked
+// volatile instead of counted (they hold no checksummed gameplay state).
+size_t Snapshot_CompareLive(int frame, int maxReport, bool learnExtraDiffs = false);

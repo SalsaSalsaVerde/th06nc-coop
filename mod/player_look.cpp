@@ -26,8 +26,8 @@ LookSettings g_settings;
 const float kFadeNear = 50.0f;
 const float kFadeFar = 100.0f;
 const float kFadeNearOpacity = 0.20f;
-const float kOutlineMaxAlpha = 0.75f;
-const float kOutlineOffset = 1.5f;
+const float kHaloMaxAlpha = 0.6f;
+const float kHaloScale = 1.22f;
 
 int PlayerIndex(const uint8_t* player) {
     if (player == Game::Player1()) return 0;
@@ -101,29 +101,35 @@ private:
     uint32_t m_saved;
 };
 
-// A dark outline: the main sprite drawn four times, offset, in black (the
-// VM color multiplies the texture, so black keeps only its shape), before
-// the faded sprite itself. Placed like the player draw places it.
-void DrawOutline(uint8_t* player, float alpha) {
+// A halo behind the faded sprite: the main sprite drawn once more, scaled
+// up, in the player's color. The sprite pipeline has no depth test, so a
+// dark outline can't be cut out from under a translucent body (black copies
+// under or over it both read as a black silhouette, docs/11); a light halo
+// in the player's own color keeps the faded player visible on any
+// background instead. Placed like the player draw places the sprite.
+void DrawHalo(uint8_t* player, float alpha, uint32_t tint) {
     uint8_t* vm = player + Game::kPlayerMainVm;
     if (VmColor(vm) == 0) return;
-    float savedPos[3];
+    float savedPos[3], savedScale[2];
     memcpy(savedPos, vm + Game::kVmPos, sizeof(savedPos));
+    memcpy(savedScale, vm + Game::kVmScale, sizeof(savedScale));
     uint32_t savedColor = VmColor(vm);
 
     Game::Fn<SetViewFn>(Game::kFnSetPlayfieldView)(Game::At<void>(Game::kPlayfieldView), 0.0f,
                                                   *Game::At<float>(Game::kConstHalf), 0);
     uint32_t a = static_cast<uint32_t>(static_cast<float>(savedColor >> 24) * alpha + 0.5f);
-    VmColor(vm) = (a ? a : 1) << 24;
-    const float offsets[4][2] = { { -kOutlineOffset, 0 }, { kOutlineOffset, 0 }, { 0, -kOutlineOffset }, { 0, kOutlineOffset } };
+    VmColor(vm) = ((a ? a : 1) << 24) | (tint & 0xFFFFFF);
+    float* scale = reinterpret_cast<float*>(vm + Game::kVmScale);
+    scale[0] = savedScale[0] * kHaloScale;
+    scale[1] = savedScale[1] * kHaloScale;
     float* pos = reinterpret_cast<float*>(vm + Game::kVmPos);
-    for (const auto& o : offsets) {
-        pos[0] = Pos(player)[0] + o[0];
-        pos[1] = Pos(player)[1] + o[1];
-        pos[2] = Game::kPlayerSpriteZ + g_settings.outlineDepthOffset;
-        Game::Fn<DrawVmFn>(Game::kFnDrawVm)(0, vm, 1);
-    }
+    pos[0] = Pos(player)[0];
+    pos[1] = Pos(player)[1];
+    pos[2] = Game::kPlayerSpriteZ + g_settings.outlineDepthOffset;
+    Game::Fn<DrawVmFn>(Game::kFnDrawVm)(0, vm, 1);
+
     VmColor(vm) = savedColor;
+    memcpy(vm + Game::kVmScale, savedScale, sizeof(savedScale));
     memcpy(vm + Game::kVmPos, savedPos, sizeof(savedPos));
 }
 
@@ -135,7 +141,7 @@ uint64_t Detour_Draw(uint8_t* player, uint64_t secondArg) {
     float alpha = FadeFor(index);
     uint32_t tint = ColorOf(index);
     if (g_settings.outline && alpha < 1.0f && Visible(player)) {
-        DrawOutline(player, (1.0f - alpha) / (1.0f - kFadeNearOpacity) * kOutlineMaxAlpha);
+        DrawHalo(player, (1.0f - alpha) / (1.0f - kFadeNearOpacity) * kHaloMaxAlpha, tint);
     }
     VmColorScope body(player + Game::kPlayerMainVm, tint, alpha);
     VmColorScope left(player + Game::kPlayerOptionVmL, tint, alpha);

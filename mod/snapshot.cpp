@@ -17,6 +17,7 @@ struct ExtraRegion {
     void* ptr;          // fixed region, or nullptr for indirect
     uintptr_t pointerRva;
     size_t size;
+    std::vector<uint8_t> skip; // 1 = volatile byte: neither restored nor compared
 };
 
 struct Slot {
@@ -56,6 +57,19 @@ bool EnsureAllocated() {
     }
     ModLog("Snapshot: allocated %d slots of %zu bytes", g_slotCount, g_dataSize);
     return true;
+}
+
+// A value that points at committed memory outside the game module (and
+// outside this DLL): a heap object the snapshot doesn't cover. Restoring
+// such a slot only ever puts back a stale address (docs/11).
+bool LooksLikeHeapPointer(uint64_t value) {
+    if (value < 0x10000 || value >= 0x00007FF000000000ull) return false;
+    uintptr_t base = Game::Base();
+    if (value >= base && value < base + Game::kExpectedSizeOfImage) return false;
+    MEMORY_BASIC_INFORMATION info;
+    if (VirtualQuery(reinterpret_cast<void*>(value), &info, sizeof(info)) != sizeof(info)) return false;
+    if (info.State != MEM_COMMIT || (info.Protect & PAGE_GUARD) || info.Protect == PAGE_NOACCESS) return false;
+    return info.Type != MEM_IMAGE;
 }
 
 bool IsVolatile(size_t i) {
@@ -135,13 +149,19 @@ bool Snapshot_Init(int slotCount) {
 }
 
 void Snapshot_AddRegion(void* ptr, size_t size) {
-    g_extras.push_back({ ptr, 0, size });
+    g_extras.push_back({ ptr, 0, size, std::vector<uint8_t>(size, 0) });
     g_extrasSize += size;
 }
 
 void Snapshot_AddIndirectRegion(uintptr_t pointerRva, size_t size) {
-    g_extras.push_back({ nullptr, pointerRva, size });
+    g_extras.push_back({ nullptr, pointerRva, size, std::vector<uint8_t>(size, 0) });
     g_extrasSize += size;
+}
+
+void Snapshot_MarkExtraVolatile(size_t regionIndex, size_t begin, size_t end) {
+    if (regionIndex >= g_extras.size()) return;
+    ExtraRegion& region = g_extras[regionIndex];
+    for (size_t i = begin; i < end && i < region.size; i++) region.skip[i] = 1;
 }
 
 void Snapshot_BeginCalibration() {
@@ -184,9 +204,25 @@ void Snapshot_CalibrationSample() {
     DiffAgainstBaseline();
 }
 
+// Every 8-byte slot holding a heap address is excluded: the object behind
+// it isn't in the snapshot, so restoring the address can only be wrong.
+size_t ExcludeHeapPointerSlots() {
+    size_t found = 0;
+    const uint64_t* words = reinterpret_cast<const uint64_t*>(g_dataBase);
+    size_t count = g_dataSize / 8;
+    for (size_t w = 0; w < count; w++) {
+        if (IsVolatile(w * 8) || !LooksLikeHeapPointer(words[w])) continue;
+        MarkVolatile(w * 8, w * 8 + 8);
+        found++;
+    }
+    return found;
+}
+
 void Snapshot_EndCalibration() {
     if (!g_calibrating) return;
     g_calibrating = false;
+    size_t pointers = ExcludeHeapPointerSlots();
+    ModLog("Snapshot: %zu heap-pointer slots excluded from restores", pointers);
     BuildRestoreRanges();
 }
 
@@ -240,7 +276,11 @@ bool Snapshot_Load(int frame) {
         const ExtraRegion& region = g_extras[i];
         void* dst = region.ptr ? region.ptr : *Game::At<void*>(region.pointerRva);
         if (dst && dst == slot->indirectPointers[i]) {
-            memcpy(dst, slot->extras.data() + offset, region.size);
+            uint8_t* out = static_cast<uint8_t*>(dst);
+            const uint8_t* saved = slot->extras.data() + offset;
+            for (size_t b = 0; b < region.size; b++) {
+                if (!region.skip[b]) out[b] = saved[b];
+            }
         } else if (dst != slot->indirectPointers[i]) {
             ModLog("Snapshot: region %zu moved between save and load (%p -> %p), not restored",
                    i, slot->indirectPointers[i], dst);
@@ -259,12 +299,13 @@ void Snapshot_Clear() {
     for (Slot& slot : g_slots) slot.frame = -1;
 }
 
-size_t Snapshot_CompareLive(int frame, int maxReport) {
+size_t Snapshot_CompareLive(int frame, int maxReport, bool learnExtraDiffs) {
     Slot* slot = SlotFor(frame);
     if (!slot || slot->frame != frame) return 0;
 
     size_t differing = 0;
     int reported = 0;
+    size_t pointerSlots = 0;
     uintptr_t dataRva = reinterpret_cast<uintptr_t>(g_dataBase) - Game::Base();
     for (const Range& range : g_restoreRanges) {
         const uint8_t* live = g_dataBase + range.offset;
@@ -272,6 +313,27 @@ size_t Snapshot_CompareLive(int frame, int maxReport) {
         if (memcmp(live, saved, range.length) == 0) continue;
         for (uint32_t i = 0; i < range.length; i++) {
             if (live[i] == saved[i]) continue;
+            if (learnExtraDiffs) {
+                // A slot that re-simulated to a different heap address is a
+                // per-frame allocation: stop restoring it (docs/11).
+                size_t word = (range.offset + i) & ~static_cast<size_t>(7);
+                uint64_t liveWord, savedWord;
+                memcpy(&liveWord, g_dataBase + word, 8);
+                memcpy(&savedWord, slot->data + word, 8);
+                if (LooksLikeHeapPointer(liveWord) && LooksLikeHeapPointer(savedWord)) {
+                    if (!IsVolatile(word)) {
+                        MarkVolatile(word, word + 8);
+                        pointerSlots++;
+                        if (reported < maxReport) {
+                            ModLog("  .data +0x%llX (rva 0x%llX) is a heap pointer that re-simulated differently -- now excluded",
+                                   static_cast<unsigned long long>(word), static_cast<unsigned long long>(dataRva + word));
+                            reported++;
+                        }
+                    }
+                    i = static_cast<uint32_t>(word + 8 - range.offset) - 1;
+                    continue;
+                }
+            }
             differing++;
             if (reported < maxReport) {
                 ModLog("  diff .data +0x%llX (rva 0x%llX): expected %02X got %02X",
@@ -283,13 +345,28 @@ size_t Snapshot_CompareLive(int frame, int maxReport) {
     }
 
     size_t offset = 0;
+    size_t learned = 0;
     for (size_t r = 0; r < g_extras.size(); r++) {
-        const ExtraRegion& region = g_extras[r];
+        ExtraRegion& region = g_extras[r];
         const uint8_t* live = static_cast<const uint8_t*>(region.ptr ? region.ptr : *Game::At<void*>(region.pointerRva));
         if (live && live == slot->indirectPointers[r]) {
             const uint8_t* saved = slot->extras.data() + offset;
             for (size_t i = 0; i < region.size; i++) {
-                if (live[i] == saved[i]) continue;
+                if (region.skip[i] || live[i] == saved[i]) continue;
+                if (learnExtraDiffs) {
+                    // Mod-owned regions and the GUI object hold no checksummed
+                    // gameplay state; a byte that re-simulates differently
+                    // there (the GUI's real-time FPS value, say) is treated
+                    // like a draw-time write from now on.
+                    region.skip[i] = 1;
+                    learned++;
+                    if (reported < maxReport) {
+                        ModLog("  extra region %zu +0x%zX re-simulated differently (%02X vs %02X) -- now excluded",
+                               r, i, saved[i], live[i]);
+                        reported++;
+                    }
+                    continue;
+                }
                 differing++;
                 if (reported < maxReport) {
                     ModLog("  diff extra region %zu +0x%zX: expected %02X got %02X", r, i, saved[i], live[i]);
@@ -298,6 +375,11 @@ size_t Snapshot_CompareLive(int frame, int maxReport) {
             }
         }
         offset += region.size;
+    }
+    if (learned) ModLog("Snapshot: %zu bytes of extra regions now excluded from restores", learned);
+    if (pointerSlots) {
+        ModLog("Snapshot: %zu heap-pointer slots now excluded from restores", pointerSlots);
+        BuildRestoreRanges();
     }
     return differing;
 }

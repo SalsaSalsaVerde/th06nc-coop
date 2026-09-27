@@ -90,6 +90,7 @@ const uintptr_t kPlayerFocused = 0x785C;       // bool, focus held (set every up
 // FUN_140003c90 (docs/07).
 const uintptr_t kVmFlags = 0xC4;               // u32: drawn only if bits 1 and 2 are both set
 const uintptr_t kVmPos = 0xC8;                 // float[3]
+const uintptr_t kVmScale = 0xE4;               // float[2]: x and y scale of the sprite
 const uintptr_t kVmColor = 0xEC;               // D3DCOLOR (B, G, R, A bytes); 0 = not drawn
 const float kPlayerSpriteZ = 0.49f;            // the player draw's z for the main VM (0x3EFAE148)
 
@@ -186,6 +187,7 @@ const uintptr_t kCrtUseFma3 = 0xABAB9C;        // int32
 // Heap objects holding simulation state, reached through a pointer global.
 const uintptr_t kGuiObjectPtr = 0xABAE28;      // dialogue/HUD state; gates bombing during dialogue
 const size_t kGuiObjectSize = 0x4228;
+const size_t kGuiFpsValue = 0x3D4C;            // float, the "60.00fps" readout (real time, not simulation)
 
 // Regions within .data that must never be rolled back: audio state, and the
 // input poll's own device-reading state (keyboard state buffer, key mapping
@@ -202,6 +204,10 @@ const RvaRange kNeverRestore[] = {
     { 0xABAD70, 0xABAD74 }, // gamepad focus-hold counter
     { 0xABAC38, 0xABAC39 }, // poll flag
     { 0xABAE8C, 0xABAE8D }, // key mapping initialized
+    // Sound-library (DxLib) state: buffer pointers reallocated as sounds
+    // play. Restoring stale ones crashed the mixer (docs/11). Every code
+    // reference into this block comes from library functions.
+    { 0x5FD000, 0x5FE800 },
 };
 
 // Entity table (overlay/24, overlay/44) and item pool (overlay/60).

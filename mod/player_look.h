@@ -13,12 +13,9 @@ struct LookSettings {
     uint32_t color = 0xFFFFFF;   // 0xRRGGBB tint for this machine's player (P1 when local)
     uint32_t p2Color = 0xA0C8FF; // same-machine play: P2's tint
     bool proximityFade = true;
-    bool outline = true;
+    bool outline = true; // a halo in the player's color behind the faded sprite (docs/11)
     bool focusRing = true;
-    // Depth offset of the outline copies relative to the sprite. The game's
-    // sprite pipeline treats a larger z as nearer (docs/11), so a negative
-    // value puts the outline behind the sprite.
-    float outlineDepthOffset = -0.004f;
+    float outlineDepthOffset = 0.0f; // z offset of the halo (the pipeline ignores depth; kept for experiments)
 };
 
 // Hooks the three player draw functions (and skips drawing a downed player,
