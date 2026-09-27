@@ -18,14 +18,16 @@ using SetViewFn = void (*)(void* view, float minZ, float maxZ, uint8_t flag);
 PlayerFn g_origDrawBombFlash = nullptr;
 PlayerFn g_origDraw = nullptr;
 PlayerFn g_origDrawOverlay = nullptr;
+using HudDrawFn = uint64_t (*)(void* hud);
+HudDrawFn g_origHudDraw = nullptr;
 
 LookSettings g_settings;
 
 // The overlay mod's near-player fade (overlay/19, from th06_multi_net):
-// linear from 15% opacity at 50 units to fully opaque at 100.
+// linear from 20% opacity at 50 units to fully opaque at 100.
 const float kFadeNear = 50.0f;
 const float kFadeFar = 100.0f;
-const float kFadeNearOpacity = 0.15f;
+const float kFadeNearOpacity = 0.20f;
 
 int PlayerIndex(const uint8_t* player) {
     if (player == Game::Player1()) return 0;
@@ -208,8 +210,21 @@ void UpdateAndDrawP2Ring(uint8_t* player) {
                                                           *Game::At<float>(Game::kConstHalf), 0);
             viewSet = true;
         }
+        VmColorScope fade(vm, 0xFFFFFF, FadeFor(1)); // the marker fades with its player
         Game::Fn<DrawVmFn>(Game::kFnDrawVm)(0, vm, 1);
     }
+}
+
+// P1's focus marker is the HUD's: its draw task draws the two GUI VMs the
+// HUD tick keeps on P1. When P1 is the other player (the guest's view),
+// they fade with P1 for the duration of that draw.
+uint64_t Detour_HudDraw(void* hud) {
+    uint8_t* gui = *Game::At<uint8_t*>(Game::kGuiObjectPtr);
+    float alpha = Player2_IsActive() && gui ? FadeFor(0) : 1.0f;
+    if (alpha >= 1.0f) return g_origHudDraw(hud);
+    VmColorScope a(gui + Game::kGuiFocusRingVm, 0xFFFFFF, alpha);
+    VmColorScope b(gui + Game::kGuiFocusRingVm + Game::kVmSize, 0xFFFFFF, alpha);
+    return g_origHudDraw(hud);
 }
 
 uint64_t Detour_DrawOverlay(uint8_t* player, uint64_t secondArg) {
@@ -237,6 +252,7 @@ bool PlayerLook_Install() {
         { Game::kFnPlayerDrawBombFlash, reinterpret_cast<void*>(&Detour_DrawSkipDowned<&g_origDrawBombFlash>), reinterpret_cast<void**>(&g_origDrawBombFlash), "PlayerDrawBombFlash" },
         { Game::kFnPlayerDraw, reinterpret_cast<void*>(&Detour_Draw), reinterpret_cast<void**>(&g_origDraw), "PlayerDraw" },
         { Game::kFnPlayerDrawOverlay, reinterpret_cast<void*>(&Detour_DrawOverlay), reinterpret_cast<void**>(&g_origDrawOverlay), "PlayerDrawOverlay" },
+        { Game::kFnHudDraw, reinterpret_cast<void*>(&Detour_HudDraw), reinterpret_cast<void**>(&g_origHudDraw), "HudDraw" },
     };
     bool ok = true;
     for (const HookSpec& h : hooks) {

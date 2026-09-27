@@ -151,6 +151,18 @@ void TickRevive() {
             int8_t configured = g_settings.startLives[i];
             if (g_state.downed[i]) Revive(i, configured > 0 ? static_cast<uint8_t>(configured) : lives);
         }
+        // The continue resets power to 0 and drops full-power items at the
+        // last player to die, who respawns invulnerable and so collects
+        // everything on screen -- in a solo game that's the player getting
+        // full power back. With separate pools the partner would stay at 0,
+        // so both simply get full power (docs/14).
+        if (continued && !g_settings.sharedResources && Player2_IsActive()) {
+            *Game::At<uint32_t>(Game::kPower) = 128;
+            Player2_Resources()->power = 128;
+            uint32_t* hud = Game::At<uint32_t>(Game::kHudDirtyFlags);
+            *hud = (*hud & ~0x10u) | 0x20u; // power changed
+            ModLog("CoopRules: continue -- both players at full power");
+        }
     }
     g_state.lastGameOver = gameOver;
 
@@ -311,15 +323,17 @@ void CoopRules_OnSceneInit(bool coopActive) {
            coopActive ? 1 : 0);
     if (!coopActive || (g_settings.startStage <= 1 && g_settings.startPoint == kStartAtStage)) return;
 
-    // Only a fresh normal run starts at stage index 0 with nothing used; a
-    // continue restarts the current stage with the same index.
+    // Stage index 0 at a scene init is always a new run from the menu: a
+    // continue doesn't re-init the scene, and later stages have higher
+    // indexes. The continues counter and score still hold the previous run's
+    // values at this point (the start function doesn't reset them), so they
+    // must not be consulted -- they blocked the checkpoint on every run after
+    // the first in a session (docs/14).
     const char* why = nullptr;
     if (*stage != 0) why = "not the first stage of a run";
     else if (replay) why = "a replay";
     else if (practice) why = "stage practice";
     else if (spell) why = "spell practice";
-    else if (continues != 0) why = "a continue";
-    else if (score != 0) why = "the score isn't 0 (a continue?)";
     if (why) {
         ModLog("CoopRules: checkpoint not applied -- %s", why);
         return;

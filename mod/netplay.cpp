@@ -44,7 +44,7 @@ const char* StateName(State s) {
     return "?";
 }
 
-const uint8_t kProtocolVersion = 4;
+const uint8_t kProtocolVersion = 5;
 enum MsgType : uint8_t { kMsgReady = 1, kMsgInputs = 2, kMsgChecksum = 3, kMsgLoadout = 4 };
 
 #pragma pack(push, 1)
@@ -67,6 +67,9 @@ struct LoadoutMsg {
     CoopSettings coop; // the sender's; the guest adopts the host's
     uint32_t color;    // the sender's player color (visual only, docs/07)
     uint8_t committed; // 1 = the sender's stage just started with this; header.session = that session
+    // The sender's netcode choice; the guest uses the host's (docs/14).
+    uint8_t netRollback;
+    uint8_t netInputDelay;
 };
 struct ReadyMsg {
     MsgHeader header;
@@ -95,6 +98,9 @@ struct ReadyMsg {
     // scene init copies only on the run's first stage (docs/13).
     uint8_t stageStartLives;
     uint8_t stageStartBombs;
+    // The host's netcode for this session; the guest adopts it (docs/14).
+    uint8_t netRollback;
+    uint8_t netInputDelay;
 };
 const int kMaxInputsPerPacket = 32;
 struct InputsMsg {
@@ -119,10 +125,30 @@ const int kBarrierTimeoutFrames = 60 * 120;
 const int kChecksumInterval = 60;
 const int kStatsInterval = 600;
 const uint32_t kDisconnectMs = 5000;
-// Gameplay buttons only: shoot, bomb, focus, directions, skip. The pause bit
-// (0x8) is stripped -- a pause menu allocates a task on the heap mid-stage,
-// which snapshots can't undo.
-const uint32_t kNetplayInputMask = 0x1F7;
+// Shoot, bomb, focus, directions, Enter, and the pause-menu buttons: pause /
+// cancel (Esc = 0x600), quick quit (Q) and quick retry (R). Pausing is
+// synchronized like any other input (docs/14): the pause state lives in the
+// static scene object, so snapshots cover it. Left out: Ctrl/';' (0x8) and
+// the replay fast-forward bit (0x8000).
+const uint32_t kNetplayInputMask = 0x1F7 | Game::kInputCancel | Game::kInputPause | Game::kInputQuickQuit |
+                                   Game::kInputQuickRetry;
+// While paused, the menu reads P1's input word only; the guest's menu
+// buttons are merged into it so either player can drive the pause menu.
+const uint32_t kPauseMenuInputs = Game::kButtonShoot | Game::kButtonBomb | Game::kButtonUp | Game::kButtonDown |
+                                  Game::kButtonLeft | Game::kButtonRight | 0x100 | Game::kInputCancel |
+                                  Game::kInputPause | Game::kInputQuickQuit | Game::kInputQuickRetry;
+
+// Netcode: this machine's own choice ([netplay] / the F8 panel), the host's
+// (as last told), and what the running session uses -- fixed at its start,
+// the host's on both machines.
+struct NetSettings {
+    bool rollback = true;
+    int inputDelay = 2;
+};
+NetSettings g_ownNet;
+NetSettings g_hostNet;
+bool g_hostNetValid = false;
+NetSettings g_sessionNet;
 
 struct InputRing {
     int frame[kRing];
@@ -355,9 +381,32 @@ uint16_t PredictRemote() {
     return g_lastConfirmed >= 0 ? g_remote.Get(g_lastConfirmed) : 0;
 }
 
+// The Steam overlay opening pauses the game by itself (the main loop sets
+// a byte the scene task treats like the pause button, docs/14) -- on this
+// machine only. Online the byte is taken away before every step and turned
+// into one press of the pause button in this player's input, so both games
+// pause on the same frame.
+bool g_overlayWasOpen = false;
+bool g_pausePressPending = false;
+
+void TakeOverlayPauseRequest() {
+    uint8_t* request = Game::At<uint8_t>(Game::kOverlayPauseRequest);
+    bool open = *request != 0;
+    *request = 0;
+    if (open && !g_overlayWasOpen && *Game::At<uint8_t>(Game::kPauseState) == 0) {
+        g_pausePressPending = true;
+        ModLog("Netplay: Steam overlay opened -- pausing both games");
+    }
+    g_overlayWasOpen = open;
+}
+
 void RecordLocalInputs() {
-    while (g_localNext <= g_frame + Cfg().netplayInputDelay) {
+    while (g_localNext <= g_frame + g_sessionNet.inputDelay) {
         uint16_t mask = static_cast<uint16_t>(SimControl_PollLocalDevices() & kNetplayInputMask);
+        if (g_pausePressPending) {
+            mask |= Game::kInputPause;
+            g_pausePressPending = false;
+        }
         g_local.Set(g_localNext, mask);
         g_localNext++;
     }
@@ -397,6 +446,19 @@ void OnInputs(const InputsMsg& msg) {
 
 // ---- stepping -------------------------------------------------------------
 
+// The game reads the pause button, and runs the pause menu, off P1's input
+// word alone. Either player's pause press reaches it, and while paused the
+// guest's menu buttons do too -- computed from synchronized inputs and
+// synchronized state, so both machines merge identically.
+uint32_t MergeForPause(uint32_t p1, uint32_t p2) {
+    p1 |= p2 & Game::kInputPause;
+    if (*Game::At<uint8_t>(Game::kPauseState) != 0) p1 |= p2 & kPauseMenuInputs;
+    return p1;
+}
+
+std::vector<ChainEntry> g_chainBefore;
+int g_chainLogsLeft = 60;
+
 uint64_t StepFrame(int f, uint32_t* outCode, bool resimulating) {
     bool haveRemote = g_remote.Has(f);
     uint16_t remote = haveRemote ? g_remote.Get(f) : PredictRemote();
@@ -406,16 +468,25 @@ uint64_t StepFrame(int f, uint32_t* outCode, bool resimulating) {
 
     uint64_t signatureBefore = Chain_Signature();
     g_listSignature[f % kRing] = signatureBefore;
-    if (Cfg().netplayRollback) Snapshot_Save(f);
+    if (g_sessionNet.rollback) Snapshot_Save(f);
+    if (!resimulating && g_chainLogsLeft > 0) Chain_Capture(&g_chainBefore);
 
     uint16_t local = g_local.Get(f);
     uint32_t p1 = IsHost() ? local : remote;
     uint32_t p2 = IsHost() ? remote : local;
+    p1 = MergeForPause(p1, p2);
+    SimControl_SetStepFrame(f);
     uint64_t result = SimControl_StepForced(outCode, p1, p2, resimulating);
+    SimControl_SetStepFrame(-1);
 
     if (!resimulating && Chain_Signature() != signatureBefore) {
-        ModLog("Netplay: task list changed during frame %d%s", f,
-               haveRemote ? "" : " (on PREDICTED input -- a rollback past this frame would be unsafe)");
+        char change[160] = "";
+        if (g_chainLogsLeft > 0) {
+            g_chainLogsLeft--;
+            Chain_DescribeChange(g_chainBefore, change, sizeof(change));
+        }
+        ModLog("Netplay: task list changed during frame %d%s (tick RVAs:%s)", f,
+               haveRemote ? "" : " on PREDICTED input -- a rollback past this frame would be unsafe", change);
     }
     if (f % kChecksumInterval == 0) StoreLocalSum(f);
     return result;
@@ -439,7 +510,10 @@ void DoRollback() {
     int end = g_frame;
     for (int f = target; f < end; f++) {
         uint32_t code = 0;
-        if (StepFrame(f, &code, true) != 0) {
+        // Only the low byte is the game's flag (its step returns a bool):
+        // testing the whole register broke off every rollback after one
+        // frame (docs/14).
+        if ((StepFrame(f, &code, true) & 0xFF) != 0) {
             ModLog("Netplay: game requested exit while re-simulating frame %d", f);
             break;
         }
@@ -451,7 +525,7 @@ void DoRollback() {
 bool CanStep(int f) {
     if (!g_local.Has(f)) return false;
     if (g_remote.Has(f)) return true;
-    if (!Cfg().netplayRollback) return false;
+    if (!g_sessionNet.rollback) return false;
     return f - g_lastConfirmed <= Cfg().netplayMaxRollback;
 }
 
@@ -459,7 +533,7 @@ bool CanStep(int f) {
 // frame I have from you", so comparing the two advantages isolates actual
 // speed difference. The side that's ahead drops a frame now and then.
 bool ShouldStallForTimeSync() {
-    if (!Cfg().netplayRollback) return false;
+    if (!g_sessionNet.rollback) return false;
     int localAdvantage = g_frame - g_remoteFrame;
     g_framesSinceSyncStall++;
     if ((localAdvantage - g_peerAdvantage) / 2 >= 1 && g_framesSinceSyncStall >= 4) {
@@ -473,8 +547,11 @@ void ResetRun() {
     g_frame = 0;
     g_local.Clear();
     g_remote.Clear();
-    for (int f = 0; f < Cfg().netplayInputDelay; f++) g_local.Set(f, 0);
-    g_localNext = Cfg().netplayInputDelay;
+    for (int f = 0; f < g_sessionNet.inputDelay; f++) g_local.Set(f, 0);
+    g_localNext = g_sessionNet.inputDelay;
+    g_overlayWasOpen = false;
+    g_pausePressPending = false;
+    g_chainLogsLeft = 60;
     g_lastConfirmed = -1;
     g_remoteFrame = 0;
     g_peerAdvantage = 0;
@@ -522,6 +599,8 @@ ReadyMsg MakeReady() {
     msg.p2Power = p2->power;
     msg.stageStartLives = *Game::At<uint8_t>(Game::kStageStartLives);
     msg.stageStartBombs = *Game::At<uint8_t>(Game::kStageStartBombs);
+    msg.netRollback = g_ownNet.rollback ? 1 : 0;
+    msg.netInputDelay = static_cast<uint8_t>(g_ownNet.inputDelay);
     return msg;
 }
 
@@ -561,7 +640,10 @@ void StartRunning() {
     }
 
     bool p1Match = peer.character == local.character && peer.shotType == local.shotType;
-    bool p2Match = peer.p2Character == local.p2Character && peer.p2ShotType == local.p2ShotType;
+    // On the guest, a P2 difference is the host's stale view of the guest's
+    // pick, which the host repairs on its side (above) -- the host's READY
+    // may simply predate that repair.
+    bool p2Match = !IsHost() || (peer.p2Character == local.p2Character && peer.p2ShotType == local.p2ShotType);
     bool match = peer.buildStamp == local.buildStamp && p1Match && p2Match &&
                  peer.difficulty == local.difficulty && peer.stage == local.stage &&
                  CoopSettings_Equal(peer.coop, local.coop);
@@ -614,11 +696,18 @@ void StartRunning() {
         }
     }
     Snapshot_EndCalibration();
+    // The host's netcode, on both machines, fixed for the whole stage.
+    if (IsHost()) {
+        g_sessionNet = g_ownNet;
+    } else {
+        g_sessionNet.rollback = peer.netRollback != 0;
+        g_sessionNet.inputDelay = peer.netInputDelay <= 10 ? peer.netInputDelay : 2;
+    }
     g_session++;
     ResetRun();
-    ModLog("Netplay: session %u starting -- %s, stage %d, seed %04X, mode %s, delay %d",
+    ModLog("Netplay: session %u starting -- %s, stage %d, seed %04X, mode %s, delay %d (the host's)",
            g_session, IsHost() ? "host=P1" : "guest=P2", local.stage, peer.rngSeed,
-           Cfg().netplayRollback ? "rollback" : "lockstep", Cfg().netplayInputDelay);
+           g_sessionNet.rollback ? "rollback" : "lockstep", g_sessionNet.inputDelay);
     SetState(State::Running, "both players at stage start");
 }
 
@@ -695,16 +784,23 @@ void OnMessage(const uint8_t* data, size_t size) {
                 g_peerSelection = s;
                 g_peerSelectionValid = true;
                 if (msg.committed) g_peerCommitSession = header.session;
+                if (!IsHost()) {
+                    g_hostNet.rollback = msg.netRollback != 0;
+                    g_hostNet.inputDelay = msg.netInputDelay <= 10 ? msg.netInputDelay : 2;
+                    g_hostNetValid = true;
+                }
                 g_partnerColor = msg.color & 0xFFFFFF;
                 g_partnerColorValid = true;
                 NormalizeBools(msg.coop);
                 if (!IsHost() && !CoopSettings_Equal(CoopRules_Settings(), msg.coop)) {
                     const CoopSettings& host = msg.coop;
                     ModLog("Netplay: using the host's co-op settings (boss HP x%.2f, invincible %d, targeting %d,"
-                           " shared resources %d, revive %d s, start lives %d/%d, bombs %d/%d)",
+                           " shared resources %d, revive %d s, start lives %d/%d, bombs %d/%d, power %d,"
+                           " start at stage %d point %d)",
                            host.bossHpMultiplier, host.invincible ? 1 : 0, host.targeting,
                            host.sharedResources ? 1 : 0, host.reviveSeconds, host.startLives[0],
-                           host.startLives[1], host.startBombs[0], host.startBombs[1]);
+                           host.startLives[1], host.startBombs[0], host.startBombs[1], host.startPower,
+                           host.startStage, host.startPoint);
                     CoopRules_SetSettings(host);
                 }
             }
@@ -724,6 +820,8 @@ LoadoutMsg MakeLoadout(uint16_t session, bool committed) {
     msg.coop = CoopRules_Settings();
     msg.color = PlayerLook_Settings().color;
     msg.committed = committed ? 1 : 0;
+    msg.netRollback = g_ownNet.rollback ? 1 : 0;
+    msg.netInputDelay = static_cast<uint8_t>(g_ownNet.inputDelay);
     return msg;
 }
 
@@ -790,6 +888,7 @@ void UpdateConnection() {
         g_session = 0; // both sides count sessions from this connection
         g_peerCommitSession = 0;
         g_lastSentSelectionValid = false;
+        g_hostNetValid = false;
         int32_t* useFma3 = Game::At<int32_t>(Game::kCrtUseFma3);
         if (*useFma3 != 0) {
             ModLog("Netplay: switching CRT math from FMA3 to SSE2 paths (identical results on every CPU)");
@@ -824,7 +923,7 @@ uint64_t RunningTick(uint32_t* outCode) {
         return DegradedTick(outCode);
     }
 
-    if (Cfg().netplayRollback && g_rollbackTarget >= 0) DoRollback();
+    if (g_sessionNet.rollback && g_rollbackTarget >= 0) DoRollback();
     SendConfirmedSums();
 
     RecordLocalInputs();
@@ -879,7 +978,9 @@ void RunSyncCheck() {
         uint32_t code = 0;
         Snapshot_Save(f);
         const RecordedInputs& in = g_syncTestInputs[f % kRing];
+        SimControl_SetStepFrame(f);
         SimControl_StepForced(&code, in.p1, in.p2, true);
+        SimControl_SetStepFrame(-1);
     }
 
     g_syncTestStats.checks++;
@@ -916,7 +1017,9 @@ uint64_t SyncTestTick(uint32_t* outCode) {
     g_syncTestInputs[g_frame % kRing] = { p1, p2 };
     g_listSignature[g_frame % kRing] = Chain_Signature();
     Snapshot_Save(g_frame);
+    SimControl_SetStepFrame(g_frame);
     uint64_t result = SimControl_StepForced(outCode, p1, p2, false);
+    SimControl_SetStepFrame(-1);
     g_frame++;
     if (g_frame > Cfg().syncTestDistance && g_frame % Cfg().syncTestInterval == 0) RunSyncCheck();
     if (g_frame % kStatsInterval == 0) LogSyncTestStats("periodic");
@@ -941,6 +1044,7 @@ uint64_t Driver(uint32_t* outCode) {
             BarrierTick();
             return 0;
         case State::Running:
+            TakeOverlayPauseRequest();
             result = RunningTick(outCode);
             break;
         case State::Degraded:
@@ -1101,7 +1205,7 @@ void Netplay_StatusText(char* out, int outSize, float* r, float* g, float* b) {
                 set(0.95f, 0.2f, 0.2f);
             } else {
                 sprintf_s(out, outSize, "CO-OP %s  %s  DELAY %d", role,
-                          Cfg().netplayRollback ? "ROLLBACK" : "LOCKSTEP", Cfg().netplayInputDelay);
+                          g_sessionNet.rollback ? "ROLLBACK" : "LOCKSTEP", g_sessionNet.inputDelay);
                 set(0.1f, 0.85f, 0.2f);
             }
             break;
@@ -1146,6 +1250,26 @@ int Netplay_LocalPlayerIndex() {
     return IsHost() ? 0 : 1;
 }
 
+bool Netplay_OwnRollback() {
+    return g_ownNet.rollback;
+}
+
+int Netplay_OwnInputDelay() {
+    return g_ownNet.inputDelay;
+}
+
+void Netplay_SetOwnNetcode(bool rollback, int inputDelay) {
+    g_ownNet.rollback = rollback;
+    g_ownNet.inputDelay = inputDelay < 0 ? 0 : (inputDelay > 10 ? 10 : inputDelay);
+}
+
+bool Netplay_HostNetcode(bool* rollback, int* inputDelay) {
+    if (IsHost() || !g_connected || !g_hostNetValid) return false;
+    *rollback = g_hostNet.rollback;
+    *inputDelay = g_hostNet.inputDelay;
+    return true;
+}
+
 bool Netplay_PartnerColor(uint32_t* rgb) {
     if (!g_partnerColorValid || Netplay_LocalPlayerIndex() < 0) return false;
     *rgb = g_partnerColor;
@@ -1154,6 +1278,9 @@ bool Netplay_PartnerColor(uint32_t* rgb) {
 
 bool Netplay_Install() {
     const Config& c = Config_Get();
+    g_ownNet.rollback = c.netplayRollback;
+    g_ownNet.inputDelay = c.netplayInputDelay;
+    g_sessionNet = g_ownNet;
     if (!Snapshot_Init(c.netplayMaxRollback + 2)) return false;
     if (!Hooks_Install(Game::kFnGameplaySceneInit, reinterpret_cast<void*>(&Detour_SceneInit),
                        reinterpret_cast<void**>(&g_origSceneInit), "GameplaySceneInit")) {

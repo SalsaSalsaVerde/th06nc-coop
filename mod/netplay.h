@@ -29,3 +29,12 @@ int Netplay_LocalPlayerIndex();
 
 // The partner's chosen player color (0xRRGGBB), once they've sent it.
 bool Netplay_PartnerColor(uint32_t* rgb);
+
+// This machine's netcode choice ([netplay] mode / input_delay, the F8
+// panel). Online the host's is used by both machines, fixed at each stage
+// start (docs/14).
+bool Netplay_OwnRollback();
+int Netplay_OwnInputDelay();
+void Netplay_SetOwnNetcode(bool rollback, int inputDelay);
+// The host's choice as last told, on a connected guest.
+bool Netplay_HostNetcode(bool* rollback, int* inputDelay);

@@ -39,7 +39,27 @@ using TaskTickFn = uint64_t (*)(void* arg);
 TaskTickFn g_origScreenShakeTick = nullptr;
 uint16_t g_shakeSeed = 0x1234;
 
+// The shake is purely cosmetic and lives outside snapshots, so a rollback
+// leaves it running where the live frames took it (it is also left out of
+// the task-list signature, game_chain.cpp). Re-simulated frames therefore
+// neither tick it (it keeps pace with rendered frames) nor start a second
+// copy of a shake the live run already started on that frame (docs/14).
+using ShakeStartFn = void* (*)(void* unused, uint32_t a, uint32_t b, uint32_t c);
+ShakeStartFn g_origScreenShakeStart = nullptr;
+int g_stepFrame = -1;
+int g_shakeStartedAt[256];
+
+void* Detour_ScreenShakeStart(void* unused, uint32_t a, uint32_t b, uint32_t c) {
+    if (g_stepFrame >= 0) {
+        int& slot = g_shakeStartedAt[g_stepFrame & 255];
+        if (g_muted && slot == g_stepFrame) return nullptr;
+        slot = g_stepFrame;
+    }
+    return g_origScreenShakeStart(unused, a, b, c);
+}
+
 uint64_t Detour_ScreenShakeTick(void* arg) {
+    if (g_muted) return 1; // keep the task, don't advance it
     uint16_t* seed = Game::At<uint16_t>(Game::kRngSeed);
     uint32_t* counter = Game::At<uint32_t>(Game::kRngCounter);
     uint16_t savedSeed = *seed;
@@ -109,7 +129,14 @@ bool SimControl_Install() {
                         reinterpret_cast<void**>(&g_origPlayBgm), "PlayBgm");
     ok &= Hooks_Install(Game::kFnScreenShakeTick, reinterpret_cast<void*>(&Detour_ScreenShakeTick),
                         reinterpret_cast<void**>(&g_origScreenShakeTick), "ScreenShakeTick");
+    ok &= Hooks_Install(Game::kFnScreenShakeStart, reinterpret_cast<void*>(&Detour_ScreenShakeStart),
+                        reinterpret_cast<void**>(&g_origScreenShakeStart), "ScreenShakeStart");
+    for (int& f : g_shakeStartedAt) f = -1;
     return ok;
+}
+
+void SimControl_SetStepFrame(int frame) {
+    g_stepFrame = frame;
 }
 
 void SimControl_SetDriver(FrameDriver driver) {

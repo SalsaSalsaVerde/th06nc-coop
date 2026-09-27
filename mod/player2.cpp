@@ -45,6 +45,7 @@ struct Player2State {
     uint8_t grazedBullets[Game::kBulletSlots / 8]; // P2's per-bullet graze flag (P1's is in the bullet)
     uint8_t lastItemCollector;                      // 0 = P1, 1 = P2
     uint8_t itemCollectorToggle;
+    uint8_t itemOwner[Game::kItemSlots];            // whom a homing item flies to (0 P1, 1 P2)
     PlayerResources resources;                      // separate-resources mode only
 };
 static_assert(sizeof(Player2State::player) >= Game::kPlayerStructSize, "P2 buffer too small");
@@ -471,6 +472,7 @@ void Spawn() {
     memset(g_state.grazedBullets, 0, sizeof(g_state.grazedBullets));
     g_state.lastItemCollector = 0;
     g_state.itemCollectorToggle = 0;
+    memset(g_state.itemOwner, 0, sizeof(g_state.itemOwner));
     // A run starts with score 0 (a continue sets it to the continue count),
     // so that's when P2's own resources start fresh -- from P1's, which the
     // game just set to the starting values. Later stages keep them.
@@ -716,23 +718,21 @@ uint64_t Detour_EnemyScript(void* scriptManager, uint8_t* enemy) {
 // ---- items ----------------------------------------------------------------
 
 // Items home toward "the player" (P1's absolute fields) once that player is
-// above the collection line or bombing, and are collected by touching its
-// hurtbox. One player collects per frame:
-//   - whichever one qualifies for auto-collect (if both, keep the last one);
-//   - if neither does, items still homing keep going to the last collector;
-//   - otherwise alternate every frame, so both players can collect by touch.
+// above the collection line or invulnerable (respawning, bombing), and are
+// collected by touching its hurtbox. The native update runs over the whole
+// pool as one player; the mod runs it twice (docs/14):
+//   1. as this frame's collector, over every item except those already
+//      homing to the other player: loose items move once, can be touched by
+//      the collector, and start homing to it if it qualifies;
+//   2. as the other player, over only the items homing to that player.
+// The collector is whoever qualifies for auto-collect; when both or neither
+// do, it alternates every frame, so both players can collect by touch and a
+// shared vacuum splits the items. Each homing item remembers its target, so
+// one player's auto-collect no longer locks the partner out of the rest.
 bool QualifiesForAutoCollect(const uint8_t* player) {
     uint8_t state = StateOf(player);
     if (state == 3) return true;
     return state == 0 && PosY(player) < *Game::At<float>(Game::kConstItemCollectLine);
-}
-
-bool AnyItemHoming() {
-    const uint8_t* item = Game::At<uint8_t>(Game::kItemPool);
-    for (int i = 0; i < Game::kItemSlots; i++, item += Game::kItemStride) {
-        if (item[0] != 0 && item[0xC] == 1) return true;
-    }
-    return false;
 }
 
 uint8_t ChooseItemCollector() {
@@ -742,19 +742,68 @@ uint8_t ChooseItemCollector() {
         g_state.lastItemCollector = p2 ? 1 : 0;
         return g_state.lastItemCollector;
     }
-    if (p1 || AnyItemHoming()) return g_state.lastItemCollector;
     g_state.itemCollectorToggle ^= 1;
     return g_state.itemCollectorToggle;
 }
 
-uint64_t Detour_ItemUpdate(void* itemManager) {
-    if (!g_active || g_swapped || ChooseItemCollector() == 0) {
-        return g_origItemUpdate(itemManager);
+uint8_t* ItemAt(int i) {
+    return Game::At<uint8_t>(Game::kItemPool) + static_cast<uintptr_t>(i) * Game::kItemStride;
+}
+
+bool ItemHoming(const uint8_t* item) {
+    return item[0] != 0 && item[0xC] == 1;
+}
+
+// Runs the native update with only the items `include` accepts in use.
+template <typename Include>
+uint64_t ItemPass(void* itemManager, uint8_t player, Include include, uint32_t* activeCount) {
+    static uint8_t hidden[Game::kItemSlots]; // the hidden item's in-use byte, 0 = not hidden
+    for (int i = 0; i < Game::kItemSlots; i++) {
+        uint8_t* item = ItemAt(i);
+        hidden[i] = item[0] != 0 && !include(i, item) ? item[0] : 0;
+        if (hidden[i]) item[0] = 0;
     }
-    return RunAsPlayer2(kItemFields, [&] {
-        ResourceScope resources;
-        return g_origItemUpdate(itemManager);
-    });
+    uint64_t result = 0;
+    if (player == 0) {
+        result = g_origItemUpdate(itemManager);
+    } else {
+        result = RunAsPlayer2(kItemFields, [&] {
+            ResourceScope resources;
+            return g_origItemUpdate(itemManager);
+        });
+    }
+    *activeCount += *Game::At<uint32_t>(Game::kItemActiveCount);
+    for (int i = 0; i < Game::kItemSlots; i++) {
+        if (hidden[i]) ItemAt(i)[0] = hidden[i];
+    }
+    return result;
+}
+
+uint64_t Detour_ItemUpdate(void* itemManager) {
+    if (!g_active || g_swapped) return g_origItemUpdate(itemManager);
+
+    uint8_t collector = ChooseItemCollector();
+    uint8_t other = collector ^ 1;
+    static bool wasHoming[Game::kItemSlots];
+    for (int i = 0; i < Game::kItemSlots; i++) wasHoming[i] = ItemHoming(ItemAt(i));
+
+    uint32_t activeCount = 0;
+    uint64_t result = ItemPass(itemManager, collector, [&](int i, const uint8_t*) {
+        return !(wasHoming[i] && g_state.itemOwner[i] == other);
+    }, &activeCount);
+    bool anyForOther = false;
+    for (int i = 0; i < Game::kItemSlots; i++) {
+        const uint8_t* item = ItemAt(i);
+        if (!wasHoming[i] && ItemHoming(item)) g_state.itemOwner[i] = collector;
+        if (wasHoming[i] && g_state.itemOwner[i] == other && item[0] != 0) anyForOther = true;
+    }
+    if (anyForOther) {
+        ItemPass(itemManager, other, [&](int i, const uint8_t* item) {
+            return wasHoming[i] && g_state.itemOwner[i] == other && item[0] != 0;
+        }, &activeCount);
+    }
+    *Game::At<uint32_t>(Game::kItemActiveCount) = activeCount;
+    return result;
 }
 
 } // namespace

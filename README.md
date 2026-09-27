@@ -41,6 +41,8 @@ test checklist and `docs/00` for what's done.
   midboss / boss start points
 - `docs/13-first-online-test.md` — the first two-machine test: what the
   logs showed, the continue desync, the late-pick race, and the fixes
+- `docs/14-second-online-test.md` — rollback's first run: bomb shakes vs.
+  rollback, synchronized pause, item ownership, netcode in F8
 
 ## Install
 
@@ -73,7 +75,10 @@ straight in; `-Restore` puts the previous proxy back).
   host's difficulty is used. Both start the stage and the game waits until
   both have (a guest who starts first sees the screen hold until the host
   starts). The host is Player 1, the guest Player 2; each uses their
-  normal controls. **F10** leaves the lobby.
+  normal controls. **F10** leaves the lobby. Either player can pause (Esc,
+  or opening the Steam overlay) and it pauses both games.
+- **Netcode**: rollback or lockstep and the input delay are in F8; online
+  the host's choice applies to both.
 - **Settings**: **F8** in the game's menus opens the co-op settings panel
   (rules, starting stock, checkpoint stage, colors); online the host's
   rules apply to both. Closing it saves to the ini.

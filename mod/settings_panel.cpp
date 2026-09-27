@@ -46,6 +46,8 @@ enum Item {
     kItemP2Lives,
     kItemP2Bombs,
     kItemStartPower,
+    kItemNetcode,
+    kItemInputDelay,
     kItemColor,
     kItemP2Color,
     kItemLocalP2,
@@ -160,6 +162,21 @@ void Describe(int item, char* label, size_t labelSize, char* value, size_t value
             snprintf(value, valueSize, "%s", names[s.startPoint >= 0 && s.startPoint <= kStartAtBoss ? s.startPoint : 0]);
             break;
         }
+        case kItemNetcode:
+        case kItemInputDelay: {
+            bool rollback = Netplay_OwnRollback();
+            int delay = Netplay_OwnInputDelay();
+            bool hostsOwn = IsGuest() && Netplay_HostNetcode(&rollback, &delay);
+            (void)hostsOwn;
+            if (item == kItemNetcode) {
+                snprintf(label, labelSize, "NETCODE");
+                snprintf(value, valueSize, "%s", rollback ? "ROLLBACK" : "LOCKSTEP");
+            } else {
+                snprintf(label, labelSize, "INPUT DELAY");
+                snprintf(value, valueSize, "%d FRAME%s", delay, delay == 1 ? "" : "S");
+            }
+            break;
+        }
         case kItemStartPower:
             snprintf(label, labelSize, "START POWER");
             if (s.startPower < 0) snprintf(value, valueSize, "GAME'S (0)");
@@ -259,6 +276,14 @@ void Change(int item, int dir) {
         CoopRules_SetOwnSettings(s);
         return;
     }
+    if (item == kItemNetcode) {
+        Netplay_SetOwnNetcode(!Netplay_OwnRollback(), Netplay_OwnInputDelay());
+        return;
+    }
+    if (item == kItemInputDelay) {
+        Netplay_SetOwnNetcode(Netplay_OwnRollback(), StepInt(Netplay_OwnInputDelay(), dir, 0, 10));
+        return;
+    }
     switch (item) {
         case kItemColor: look.color = StepColor(look.color, dir); break;
         case kItemP2Color: look.p2Color = StepColor(look.p2Color, dir); break;
@@ -305,6 +330,8 @@ void Save() {
     WriteInt("coop", "start_stage", s.startStage);
     const char* points[] = { "stage", "midboss", "boss" };
     WriteString("coop", "start_point", points[s.startPoint >= 0 && s.startPoint <= kStartAtBoss ? s.startPoint : 0]);
+    WriteString("netplay", "mode", Netplay_OwnRollback() ? "rollback" : "lockstep");
+    WriteInt("netplay", "input_delay", Netplay_OwnInputDelay());
     snprintf(buf, sizeof(buf), "%06X", look.color);
     WriteString("visual", "color", buf);
     snprintf(buf, sizeof(buf), "%06X", look.p2Color);
@@ -353,7 +380,7 @@ uint32_t SettingsPanel_FilterInput(uint32_t input) {
 
     uint32_t pressed = input & ~g_prevInput;
     g_prevInput = input;
-    if (f8Pressed || (pressed & (Game::kButtonBomb | Game::kButtonMenu))) {
+    if (f8Pressed || (pressed & (Game::kButtonBomb | Game::kButtonMenu | Game::kInputCancel))) {
         Close();
         return 0;
     }
@@ -395,7 +422,7 @@ void SettingsPanel_Draw(OverlayRenderer& overlay) {
         snprintf(line, sizeof(line), "%s%s%s", Editable(item) ? "< " : "  ", value, Editable(item) ? " >" : "");
         DrawText(overlay, line, valueX, y, charW, charH, alpha);
     }
-    DrawText(overlay, "UP/DOWN SELECT   LEFT/RIGHT CHANGE   BOMB OR F8 CLOSES AND SAVES", left,
+    DrawText(overlay, "UP/DOWN SELECT   LEFT/RIGHT CHANGE   BOMB, ESC OR F8 CLOSES AND SAVES", left,
              top + lineStep * (kItemCount + 3.0f), charW * 0.75f, charH * 0.75f, 0.8f);
     const Config& c = Config_Get();
     char keys[96];

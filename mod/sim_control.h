@@ -23,8 +23,15 @@ void SimControl_SetDriver(FrameDriver driver);
 uint64_t SimControl_StepNative(uint32_t* outCode);
 
 // One native simulation frame with both players' inputs forced. `muted`
-// suppresses sound effects (for re-simulated frames).
+// marks a re-simulated frame: no sound effects, no music starts, and the
+// cosmetic screen shake neither ticks nor starts twice (docs/14). The low
+// byte of the result is the game's "leave the frame loop" flag; the rest of
+// the register is garbage (the game's step returns a bool).
 uint64_t SimControl_StepForced(uint32_t* outCode, uint32_t p1Input, uint32_t p2Input, bool muted);
+
+// The netplay frame number the next forced step simulates (-1 = none), so a
+// re-simulated frame can tell the shakes the live run already started.
+void SimControl_SetStepFrame(int frame);
 
 // The local devices' input mask as the game itself reads it (keyboard +
 // XInput controller 0). Call at most once per simulated frame.

@@ -77,7 +77,8 @@ are. Both machines simulate both players.
    step. Local input is sampled once per simulated frame, scheduled
    `input_delay` frames ahead, and every packet carries the newest 32 local
    frames (loss up to 31 consecutive packets is invisible). The pause bit
-   is stripped (a pause menu allocates a heap task — see "Limits").
+   is synchronized like any other button (docs/14: the pause state is in
+   the static scene object, nothing is heap-allocated).
    - **Lockstep**: frame N waits for the peer's input for N.
    - **Rollback**: frame N runs on a predicted remote input (the last
      confirmed one) as long as it's at most `max_rollback` frames past the

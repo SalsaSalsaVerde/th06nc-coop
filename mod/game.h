@@ -249,7 +249,13 @@ const RvaRange kNeverRestore[] = {
     // Written by the heap-resident screen-shake task: cosmetic.
     { 0x53CAC0, 0x53CAD0 }, // camera / shake offsets
     { 0x549F70, 0x549F80 }, // shake amplitude
-    { 0xC6E388, 0xC6E38C }, // shake counter
+    // The std::vector of live shake states (begin, end, capacity): the
+    // shake start pushes onto it, the shake's delete callback erases from it.
+    // Its contents are heap, so its pointers must never be rewound (docs/14).
+    { 0xC6E380, 0xC6E398 },
+    // The main loop sets this byte every rendered frame while the Steam
+    // overlay is open; netplay turns it into a synchronized pause (docs/14).
+    { 0xC6DB90, 0xC6DB91 },
 };
 
 // The screen shake (docs/11): FUN_140077890 allocates a state block and a
@@ -257,7 +263,27 @@ const RvaRange kNeverRestore[] = {
 // list; the node's tick writes the camera offsets from random numbers. A
 // snapshot can't restore either allocation, so the tick is given a private
 // random sequence (sim_control.cpp) and its outputs are never restored.
+// Only the four bomb functions start one (docs/14).
 const uintptr_t kFnScreenShakeTick = 0x77AB0;
+const uintptr_t kFnScreenShakeStart = 0x77890; // (unused, duration, strength, ...) -> state or 0; callers ignore it
+
+// Pause (docs/14). The gameplay scene object is the static at 0x53CAB0 (its
+// +0x24 is the stage index); its +0x950 byte is the pause state. The scene
+// task (FUN_14003baa0) opens the pause menu on a fresh press of input bit
+// 0x400 (Esc gives 0x600: pause + cancel) or while the overlay byte is set,
+// and returns 3 while paused, which ends that frame's update walk early.
+// The pause menu itself (FUN_14000a850, run by the menu task on the static
+// object 0x429270) reads P1's input word. Nothing is heap-allocated.
+const uintptr_t kPauseState = 0x53D400;       // u8, scene +0x950
+const uintptr_t kOverlayPauseRequest = 0xC6DB90; // u8, set by the main loop while the overlay is open
+const uint32_t kInputPause = 0x400;
+const uint32_t kInputCancel = 0x200;
+const uint32_t kInputQuickQuit = 0x800;       // Q, in the pause menu
+const uint32_t kInputQuickRetry = 0x4000;     // R, in the pause menu
+
+// HUD draw (the draw-list task that draws the sidebar and P1's focus marker:
+// the two VMs at GUI +0x120/+0x240, looped at 0x14003e8f1).
+const uintptr_t kFnHudDraw = 0x3E600;
 // Entity table (overlay/24, overlay/44) and item pool (overlay/60).
 const uintptr_t kEntityTable = 0xAEE0B8;
 const int kEntitySlots = 256;
@@ -273,6 +299,7 @@ const uint8_t kEntityBossBit = 0x08;           // the currently tracked boss
 const uintptr_t kItemPool = 0xBFB2F8;
 const int kItemSlots = 1024;
 const uintptr_t kItemStride = 0x160;
+const uintptr_t kItemActiveCount = 0xBFB2F0;   // u32, recounted by every item update (item [0] = in use, [0xC] = 1 homing)
 
 const uint16_t kPriorityPlayerUpdate = 7;
 const uint16_t kPriorityPlayerDrawBombFlash = 7;

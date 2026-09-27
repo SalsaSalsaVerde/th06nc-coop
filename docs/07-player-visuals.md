@@ -10,7 +10,7 @@ Settings (`[visual]`, each machine its own):
 |---|---|---|
 | `color` | `FFFFFF` | tint for *your* player (P1 in same-machine play); sent to the partner online so they see you in it |
 | `p2_color` | `A0C8FF` | same-machine play: P2's tint (online: the host's P2 before the guest's color arrives) |
-| `proximity_fade` | 1 | the other player and their shots fade when close to you |
+| `proximity_fade` | 1 | the other player, their shots and their focus marker fade when close to you |
 | `focus_ring` | 1 | the game's own focus marker on the other player while they hold focus |
 
 (`outline` existed until 2026-09-27 — a halo behind the faded sprite; the
@@ -56,7 +56,8 @@ is drawn with `p2_color`, the guest's P1 untinted.
 
 Only the *other* player fades — online, the partner; same machine, P2 (P1
 never fades). The overlay mod's formula (overlay/19, from th06_multi_net):
-opacity 100% at ≥100 units apart, linearly down to **15%** at ≤50.
+opacity 100% at ≥100 units apart, linearly down to **20%** at ≤50 (15%
+for a few hours on 2026-09-27, then back to 20% at the user's request).
 
 The player's shots fade with them: both player draw passes walk the 80
 shot slots (`+0x410`, stride `0x170`, type at `+0x10`, VM at `+0x18`) and
@@ -75,6 +76,11 @@ The game's own (docs/11 "focus marker"): the HUD keeps two sprite VMs and
 runs scripts 0x641/0x642 on them over P1 while P1 holds focus. P2 gets a
 copy of that pair, ticked and drawn after P2's overlay pass, with the
 playfield view set first. The old Present-hook ring is gone.
+
+The marker fades with its player: P2's copy is drawn with the fade alpha,
+and P1's -- drawn by the HUD draw task `FUN_14003e600` in a loop at
+`0x14003e8f1` -- has its two VMs' alpha scaled around a hook of that draw
+when P1 is the partner (docs/14).
 
 ## Downed players
 
