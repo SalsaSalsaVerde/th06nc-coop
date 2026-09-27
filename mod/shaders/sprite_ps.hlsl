@@ -1,16 +1,11 @@
-// Textured-sprite pixel shader. Samples straight RGBA (with alpha
-// premultiplied by the source pixel's own alpha channel, same convention
-// as quad_ps.hlsl's per-vertex alpha) and applies a uniform alpha
-// multiplier on top, set per-draw from the CPU side -- this is what the
-// "translucent when near the local player" guidance-doc requirement
-// (docs/00-overview.md's tracked-but-not-yet-implemented list) will hook
-// into once that lands; for now it's just always 1.0.
+// Textured-sprite pixel shader: the texture's straight RGBA times a
+// per-draw tint (rgb multiplier, alpha multiplier). The font sheet's glyphs
+// are white, so the tint colors text.
 Texture2D spriteTexture : register(t0);
 SamplerState spriteSampler : register(s0);
 
 cbuffer SpriteParams : register(b0) {
-    float alphaMultiplier;
-    float3 _padding;
+    float4 tint;
 };
 
 struct PSInput {
@@ -20,6 +15,7 @@ struct PSInput {
 
 float4 main(PSInput input) : SV_TARGET {
     float4 texColor = spriteTexture.Sample(spriteSampler, input.uv);
-    texColor.a *= alphaMultiplier;
+    texColor.rgb *= tint.rgb;
+    texColor.a *= tint.a;
     return texColor;
 }

@@ -10,3 +10,4 @@ mod/installer/build/
 *.res
 *.exe
 __pycache__/
+*.cso

@@ -22,8 +22,8 @@ void TextRenderer_EnsureLoaded(OverlayRenderer& overlay);
 // Draws `text` starting with its top-left corner at (xFrac, yFrac) (screen-
 // fraction coordinates, same convention as OverlaySprite/OverlayQuad).
 // `charWidthFrac`/`charHeightFrac` size each glyph cell; consecutive
-// characters advance by `charWidthFrac` with no extra spacing. No color
-// tint (see cpp comment) -- always drawn in the font sheet's own native
-// color, alpha-multiplied by `alpha`.
+// characters advance by `charWidthFrac` with no extra spacing. The glyphs
+// are white in the sheet; r/g/b color them.
 void DrawText(OverlayRenderer& overlay, const char* text, float xFrac, float yFrac,
-              float charWidthFrac, float charHeightFrac, float alpha);
+              float charWidthFrac, float charHeightFrac, float alpha,
+              float r = 1.0f, float g = 1.0f, float b = 1.0f);

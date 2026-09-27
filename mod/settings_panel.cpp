@@ -350,14 +350,14 @@ void SettingsPanel_Draw(OverlayRenderer& overlay) {
 
     const float left = 0.20f;
     const float top = 0.16f;
-    const float charW = 0.0105f;
-    const float charH = 0.022f;
-    const float lineStep = 0.034f;
+    const float charW = 16.0f / 1456.0f; // one glyph cell = 16px at the 1456x816 window
+    const float charH = 16.0f / 816.0f;
+    const float lineStep = 0.032f;
     const float valueX = left + 0.34f;
     float height = lineStep * (kItemCount + 5);
     overlay.DrawQuad(OverlayQuad{ 0.5f, top + height * 0.5f - 0.02f, 0.33f, height * 0.5f + 0.02f, 0.03f, 0.03f, 0.08f, 0.85f });
 
-    DrawText(overlay, "CO-OP SETTINGS", left, top, charW * 1.3f, charH * 1.3f, 1.0f);
+    DrawText(overlay, "CO-OP SETTINGS", left, top, charW * 1.5f, charH * 1.5f, 1.0f, 1.0f, 0.9f, 0.6f);
     const char* who = IsGuest() ? "RULES ARE SET BY THE HOST" : (Online() ? "YOU ARE THE HOST: THESE ARE THE RULES" : "PLAYING ON THIS PC");
     DrawText(overlay, who, left, top + lineStep * 1.2f, charW * 0.8f, charH * 0.8f, 0.8f);
 
@@ -365,7 +365,7 @@ void SettingsPanel_Draw(OverlayRenderer& overlay) {
         char label[40], value[40], line[48];
         Describe(item, label, sizeof(label), value, sizeof(value));
         float y = top + lineStep * (item + 2.6f);
-        float alpha = Editable(item) ? 1.0f : 0.4f;
+        float alpha = Editable(item) ? 1.0f : 0.55f;
         snprintf(line, sizeof(line), "%s%s", item == g_selected ? "> " : "  ", label);
         DrawText(overlay, line, left, y, charW, charH, alpha);
         snprintf(line, sizeof(line), "%s%s%s", Editable(item) ? "< " : "  ", value, Editable(item) ? " >" : "");

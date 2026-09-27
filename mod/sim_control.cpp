@@ -67,7 +67,7 @@ bool SimControl_Install() {
     ok &= Hooks_Install(Game::kFnInputPoll, reinterpret_cast<void*>(&Detour_InputPoll),
                         reinterpret_cast<void**>(&g_origInputPoll), "InputPoll");
     ok &= Hooks_Install(Game::kFnSoundFlush, reinterpret_cast<void*>(&Detour_SoundFlush),
-                        reinterpret_cast<void**>(&g_origSoundFlush), "SoundFlush");
+                        reinterpret_cast<void**>(&g_origSoundFlush), "SoundFlush", /*returnsValue=*/false);
     ok &= Hooks_Install(Game::kFnPlayBgm, reinterpret_cast<void*>(&Detour_PlayBgm),
                         reinterpret_cast<void**>(&g_origPlayBgm), "PlayBgm");
     return ok;

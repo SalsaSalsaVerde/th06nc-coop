@@ -34,7 +34,7 @@ void TextRenderer_EnsureLoaded(OverlayRenderer& overlay) {
 }
 
 void DrawText(OverlayRenderer& overlay, const char* text, float xFrac, float yFrac,
-              float charWidthFrac, float charHeightFrac, float alpha) {
+              float charWidthFrac, float charHeightFrac, float alpha, float r, float g, float b) {
     if (!g_fontTex.srv || !text) return;
 
     float cursorX = xFrac;
@@ -60,7 +60,8 @@ void DrawText(OverlayRenderer& overlay, const char* text, float xFrac, float yFr
                 charWidthFrac * 0.5f,
                 charHeightFrac * 0.5f,
                 alpha,
-                uMin, vMin, uMax, vMax
+                uMin, vMin, uMax, vMax,
+                r, g, b
             };
             overlay.DrawSprite(glyph);
         }

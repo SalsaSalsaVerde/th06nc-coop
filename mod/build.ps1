@@ -59,6 +59,12 @@ foreach ($src in $sourceFiles) {
     $objFiles += "`"$objPath`""
 }
 
+Write-Host "Assembling hook_thunks.asm..."
+$thunkObj = Join-Path $buildDir "hook_thunks.obj"
+cmd /c "`"$vcvars`" >nul && ml64.exe /nologo /c /Fo `"$thunkObj`" `"$(Join-Path $scriptDir 'hook_thunks.asm')`""
+if ($LASTEXITCODE -ne 0) { throw "ml64 failed (exit code $LASTEXITCODE)" }
+$objFiles += "`"$thunkObj`""
+
 Write-Host "Linking..."
 cmd /c "`"$vcvars`" >nul && link.exe /nologo /DLL /DEF:`"$forwardDef`" $($objFiles -join ' ') `"$origLib`" user32.lib /OUT:`"$outDll`""
 if ($LASTEXITCODE -ne 0) { throw "Link failed (exit code $LASTEXITCODE)" }

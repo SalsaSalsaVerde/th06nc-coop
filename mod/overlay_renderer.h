@@ -25,14 +25,14 @@ struct OverlaySprite {
     float centerYFrac;
     float halfWidthFrac;
     float halfHeightFrac;
-    float alpha; // uniform alpha multiplier, used for the near-local-player
-                 // translucency effect (see present_hook.cpp's
-                 // ComputeProximityAlpha) and the real/simulated-remote
-                 // distinction.
+    float alpha; // uniform alpha multiplier
     // UV sub-rect within the bound texture, 0..1. Defaults to the whole
     // texture (0,0)-(1,1) -- set narrower to draw one frame out of a
     // multi-frame sprite sheet (see docs/23-sprite-animation.md).
     float uMin = 0.0f, vMin = 0.0f, uMax = 1.0f, vMax = 1.0f;
+    // Multiplied into the texture's color (1 = as is). The font sheet's
+    // glyphs are white, so this colors text.
+    float r = 1.0f, g = 1.0f, b = 1.0f;
 };
 
 class OverlayRenderer {
@@ -46,6 +46,8 @@ public:
     void EnsureInitialized(IDXGISwapChain* swapChain);
 
     void BeginFrame();
+    // Quads and sprites draw in call order: quads are batched, and the batch
+    // is flushed before every sprite and at EndFrame (docs/11).
     void DrawQuad(const OverlayQuad& quad);
     void DrawSprite(const OverlaySprite& sprite);
     void EndFrame();
@@ -58,6 +60,7 @@ public:
 
 private:
     bool CreateDeviceResources();
+    void FlushQuads();
     bool CreateSizeDependentResources(IDXGISwapChain* swapChain);
     void ReleaseSizeDependentResources();
     void ReleaseDeviceResources();
@@ -99,6 +102,7 @@ private:
     static const UINT kMaxVertices = kMaxQuadsPerFrame * 6;
     Vertex m_vertexScratch[kMaxVertices];
     UINT m_vertexCount = 0;
+    bool m_formatLogged = false;
 
     struct SpriteVertex {
         float x, y;

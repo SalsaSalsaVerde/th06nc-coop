@@ -22,7 +22,11 @@ const uintptr_t kPlayerLastEnemyHit = 0x7740; // float[3], homing-shot target
 const uintptr_t kPlayerState = 0x7898;        // u8: 0 normal, 1/2 dying/respawning, 3 bombing
 const uintptr_t kPlayerDeathCounter = 0x7858; // int32: frames into the death animation; respawn at > 0x1D
 const uintptr_t kPlayerOutFlag = 0xA2B4;      // u8: set by the final death (out of lives)
-const uintptr_t kPlayerBombing = 0x9EC8;      // u8
+const uintptr_t kPlayerBombing = 0x9EC8;
+const uintptr_t kPlayerShotTimer = 0x40C;     // int32: -1 idle; set to 0 by a shoot press, counts up while held
+const uintptr_t kPlayerShotSlots = 0x410;     // 80 shot slots of 0x170 bytes; +0x10 nonzero = in use
+const uintptr_t kPlayerShotSlotStride = 0x170;
+const int kPlayerShotSlotCount = 80;      // u8
 const uintptr_t kPlayerNodePtrs = 0x78A8;     // 4 task-node pointers (P1's are read by teardown)
 
 // Scheduler (overlay/08): priority-sorted doubly-linked lists of 64-byte
@@ -150,7 +154,8 @@ const int kSoundQueueLength = 3;
 const uintptr_t kCharacter = 0x53CAD0;         // u8: 0 Reimu, 1 Marisa
 const uintptr_t kShotType = 0x53CAD1;          // u8: 0 A, 1 B
 const uintptr_t kDifficulty = 0x53D410;        // u8: 0-3, 4 = Extra
-const uintptr_t kStageNumber = 0x53CAD4;       // int32
+const uintptr_t kStageNumber = 0x53CAD4;       // int32, 0-based: a new game writes 0, Extra 6 (docs/11)
+const uintptr_t kContinuesUsed = 0x549D2C;     // u8
 const uintptr_t kLives = 0x549D40;             // u8
 const uintptr_t kBombs = 0x549D41;             // u8
 // Lives/bombs as they were at the stage's scene init (FUN_14003c250 copies

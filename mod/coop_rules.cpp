@@ -23,6 +23,7 @@ struct RulesState {
     int32_t reviveTimer;
 };
 RulesState g_state = { -1, { 0, 0 }, 0, 0 };
+int g_bombLogsLeft = 20;
 
 int32_t* EntityInt(uint8_t* slot, uintptr_t offset) {
     return reinterpret_cast<int32_t*>(slot + offset);
@@ -168,7 +169,17 @@ uint64_t Detour_PlayerUpdate(uint8_t* player, uint64_t secondArg) {
     }
 
     uint8_t gameOverBefore = GameOverFlag();
+    uint8_t bombingBefore = player[Game::kPlayerBombing];
+    uint32_t inputNow = *Game::At<uint32_t>(Game::kInputCurrent);
+    uint32_t inputBefore = *Game::At<uint32_t>(Game::kInputPrevious);
     uint64_t result = g_origPlayerUpdate(player, secondArg);
+    // Diagnostic (docs/11): the first test reported unprompted bombs.
+    if (!bombingBefore && player[Game::kPlayerBombing] && g_bombLogsLeft > 0) {
+        g_bombLogsLeft--;
+        ModLog("Diag: P%d started a bomb -- input now %03X, last frame %03X, bombs left %d, state %d, respawn timer %d",
+               index + 1, inputNow, inputBefore, *Game::At<uint8_t>(Game::kBombs), player[Game::kPlayerState],
+               *reinterpret_cast<int32_t*>(player + Game::kPlayerRespawnTimer));
+    }
     if (!g_settings.sharedResources && Player2_IsActive() && !gameOverBefore && GameOverFlag()) {
         g_state.downed[index] = 1;
         g_state.reviveTimer = 0;
@@ -268,17 +279,35 @@ int CoopRules_ReviveFramesLeft() {
 
 void CoopRules_OnSceneInit(bool coopActive) {
     int32_t* stage = Game::At<int32_t>(Game::kStageNumber);
-    if (!coopActive || g_settings.startStage <= 1 || *stage != 1) return;
-    if (*Game::At<uint8_t>(Game::kReplayFlag) || *Game::At<uint8_t>(Game::kPracticeFlag) ||
-        *Game::At<uint8_t>(Game::kSpellPracticeFlag)) {
+    uint8_t replay = *Game::At<uint8_t>(Game::kReplayFlag);
+    uint8_t practice = *Game::At<uint8_t>(Game::kPracticeFlag);
+    uint8_t spell = *Game::At<uint8_t>(Game::kSpellPracticeFlag);
+    uint8_t continues = *Game::At<uint8_t>(Game::kContinuesUsed);
+    uint32_t score = *Game::At<uint32_t>(Game::kScore);
+    ModLog("CoopRules: scene init -- stage index %d, replay %d, practice %d, spell practice %d, continues %d, score %u,"
+           " checkpoint stage %d, co-op %d",
+           *stage, replay, practice, spell, continues, score, g_settings.startStage, coopActive ? 1 : 0);
+    if (!coopActive || g_settings.startStage <= 1) return;
+
+    // Only a fresh normal run starts at stage index 0 with nothing used; a
+    // continue restarts the current stage with the same index.
+    const char* why = nullptr;
+    if (*stage != 0) why = "not the first stage of a run";
+    else if (replay) why = "a replay";
+    else if (practice) why = "stage practice";
+    else if (spell) why = "spell practice";
+    else if (continues != 0) why = "a continue";
+    else if (score != 0) why = "the score isn't 0 (a continue?)";
+    if (why) {
+        ModLog("CoopRules: checkpoint not applied -- %s", why);
         return;
     }
-    if (*Game::At<uint32_t>(Game::kScore) != 0) return; // not a fresh run (a continue sets the score to the count)
-    *stage = g_settings.startStage;
-    ModLog("CoopRules: checkpoint -- the run starts at stage %d", *stage);
+    *stage = g_settings.startStage - 1;
+    ModLog("CoopRules: checkpoint -- the run starts at stage %d", g_settings.startStage);
 }
 
 void CoopRules_ResetRun() {
+    g_bombLogsLeft = 20;
     g_state.downed[0] = 0;
     g_state.downed[1] = 0;
     g_state.reviveTimer = 0;

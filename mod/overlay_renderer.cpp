@@ -3,6 +3,7 @@
 #include "shaders/quad_ps.h"
 #include "shaders/sprite_vs.h"
 #include "shaders/sprite_ps.h"
+#include "mod_log.h"
 
 OverlayRenderer::~OverlayRenderer() {
     ReleaseSizeDependentResources();
@@ -108,9 +109,8 @@ bool OverlayRenderer::CreateDeviceResources() {
     if (FAILED(m_device->CreateBuffer(&spriteVbDesc, nullptr, &m_spriteVertexBuffer))) {
         return false;
     }
-    // Matches shaders/sprite_ps.hlsl's SpriteParams cbuffer (float +
-    // float3 padding, rounds up to 16 bytes -- constant buffers must be a
-    // multiple of 16 bytes).
+    // Matches shaders/sprite_ps.hlsl's SpriteParams cbuffer (float4 tint:
+    // rgb multiplier + alpha multiplier).
     D3D11_BUFFER_DESC paramsDesc = {};
     paramsDesc.Usage = D3D11_USAGE_DYNAMIC;
     paramsDesc.ByteWidth = 16;
@@ -160,6 +160,11 @@ void OverlayRenderer::EnsureInitialized(IDXGISwapChain* swapChain) {
 
     DXGI_SWAP_CHAIN_DESC scd = {};
     swapChain->GetDesc(&scd);
+    if (!m_formatLogged) {
+        m_formatLogged = true;
+        ModLog("Overlay: back buffer %ux%u, DXGI format %d", scd.BufferDesc.Width, scd.BufferDesc.Height,
+               static_cast<int>(scd.BufferDesc.Format));
+    }
     if (!m_sizeResourcesReady ||
         scd.BufferDesc.Width != m_backBufferWidth ||
         scd.BufferDesc.Height != m_backBufferHeight) {
@@ -253,6 +258,7 @@ SpriteTexture OverlayRenderer::CreateSpriteTexture(unsigned int width, unsigned 
 void OverlayRenderer::DrawSprite(const OverlaySprite& sprite) {
     if (!m_deviceResourcesReady || !m_sizeResourcesReady) return;
     if (!sprite.texture.srv) return;
+    FlushQuads(); // keep call order: a panel background must land under its text
 
     float cx = sprite.centerXFrac * 2.0f - 1.0f;
     float cy = 1.0f - sprite.centerYFrac * 2.0f;
@@ -278,7 +284,7 @@ void OverlayRenderer::DrawSprite(const OverlaySprite& sprite) {
 
     D3D11_MAPPED_SUBRESOURCE mappedParams;
     if (SUCCEEDED(m_context->Map(m_spriteParamsBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedParams))) {
-        float params[4] = { sprite.alpha, 0.0f, 0.0f, 0.0f };
+        float params[4] = { sprite.r, sprite.g, sprite.b, sprite.alpha };
         memcpy(mappedParams.pData, params, sizeof(params));
         m_context->Unmap(m_spriteParamsBuffer, 0);
     }
@@ -299,28 +305,30 @@ void OverlayRenderer::DrawSprite(const OverlaySprite& sprite) {
     m_context->Draw(6, 0);
 }
 
+void OverlayRenderer::FlushQuads() {
+    if (m_vertexCount == 0) return;
+    D3D11_MAPPED_SUBRESOURCE mapped;
+    if (SUCCEEDED(m_context->Map(m_vertexBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+        memcpy(mapped.pData, m_vertexScratch, sizeof(Vertex) * m_vertexCount);
+        m_context->Unmap(m_vertexBuffer, 0);
+
+        // Re-bind the flat-color pipeline every time: a DrawSprite in
+        // between binds the sprite pipeline's shaders and input layout.
+        UINT stride = sizeof(Vertex);
+        UINT offset = 0;
+        ID3D11Buffer* vbs[] = { m_vertexBuffer };
+        m_context->IASetVertexBuffers(0, 1, vbs, &stride, &offset);
+        m_context->IASetInputLayout(m_inputLayout);
+        m_context->VSSetShader(m_vs, nullptr, 0);
+        m_context->PSSetShader(m_ps, nullptr, 0);
+        m_context->Draw(m_vertexCount, 0);
+    }
+    m_vertexCount = 0;
+}
+
 void OverlayRenderer::EndFrame() {
     if (!m_deviceResourcesReady || !m_sizeResourcesReady) return;
-
-    if (m_vertexCount > 0) {
-        D3D11_MAPPED_SUBRESOURCE mapped;
-        if (SUCCEEDED(m_context->Map(m_vertexBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
-            memcpy(mapped.pData, m_vertexScratch, sizeof(Vertex) * m_vertexCount);
-            m_context->Unmap(m_vertexBuffer, 0);
-
-            // Explicitly re-bind the flat-color pipeline's state here (not
-            // just in BeginFrame) since a DrawSprite call in between may
-            // have rebound the sprite pipeline's shaders/input layout.
-            UINT stride = sizeof(Vertex);
-            UINT offset = 0;
-            ID3D11Buffer* vbs[] = { m_vertexBuffer };
-            m_context->IASetVertexBuffers(0, 1, vbs, &stride, &offset);
-            m_context->IASetInputLayout(m_inputLayout);
-            m_context->VSSetShader(m_vs, nullptr, 0);
-            m_context->PSSetShader(m_ps, nullptr, 0);
-            m_context->Draw(m_vertexCount, 0);
-        }
-    }
+    FlushQuads();
 
     // Restore the game's own state.
     ID3D11RenderTargetView* rtvs[] = { m_savedRtv };

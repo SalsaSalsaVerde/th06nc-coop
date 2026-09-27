@@ -349,6 +349,36 @@ void QueueSound(int id) {
 // P2's update runs the game's own player update on P2's struct, with P2's
 // input swapped into the global input words for the duration. Everything the
 // update calls (shot patterns, bombs) reads input from those same words.
+// Diagnostic (docs/11): the first test reported P2 moving but not shooting
+// or focusing. While P2 holds shoot/focus/bomb, log what the update saw
+// and did, once a second, a few times per stage.
+int g_inputLogsLeft = 12;
+int g_inputLogTimer = 0;
+
+int ShotSlotsInUse(const uint8_t* player) {
+    int used = 0;
+    for (int i = 0; i < Game::kPlayerShotSlotCount; i++) {
+        const uint8_t* slot = player + Game::kPlayerShotSlots + static_cast<uintptr_t>(i) * Game::kPlayerShotSlotStride;
+        if (*reinterpret_cast<const uint16_t*>(slot + 0x10) != 0) used++;
+    }
+    return used;
+}
+
+void LogInputDiagnostic(uint32_t p2Input) {
+    if (g_inputLogsLeft <= 0) return;
+    bool acting = (p2Input & (Game::kButtonShoot | Game::kButtonFocus | Game::kButtonBomb)) != 0;
+    if (!acting) {
+        g_inputLogTimer = 0;
+        return;
+    }
+    if (g_inputLogTimer++ % 60 != 0) return;
+    g_inputLogsLeft--;
+    ModLog("Diag: P2 input %03X -> state %d, shot timer %d, focused %d, bombing %d, shots in use %d (P1: %d), pos (%.0f, %.0f)",
+           p2Input, g_p2[Game::kPlayerState], *reinterpret_cast<int32_t*>(g_p2 + Game::kPlayerShotTimer),
+           g_p2[Game::kPlayerFocused], g_p2[Game::kPlayerBombing], ShotSlotsInUse(g_p2), ShotSlotsInUse(Game::Player1()),
+           PosX(g_p2), PosY(g_p2));
+}
+
 uint64_t Player2UpdateTick(void* player) {
     uint32_t* current = Game::At<uint32_t>(Game::kInputCurrent);
     uint32_t* previous = Game::At<uint32_t>(Game::kInputPrevious);
@@ -368,6 +398,7 @@ uint64_t Player2UpdateTick(void* player) {
 
     *current = savedCurrent;
     *previous = savedPrevious;
+    LogInputDiagnostic(p2Input);
     return result;
 }
 
@@ -452,7 +483,16 @@ void Spawn() {
     // refills to); record P2's the same way.
     g_state.resources.respawnBombs = g_state.resources.bombs;
     g_active = true;
+    g_inputLogsLeft = 12;
+    g_inputLogTimer = 0;
     ModLog("Player2: spawned at (%.1f, %.1f)", PosX(g_p2), PosY(g_p2));
+    ModLog("Diag: at spawn P2 shot timer %d, respawn timer %d, bombing %d, shot fns %p/%p, bomb fn %p; P1 shot fns %p/%p",
+           *reinterpret_cast<int32_t*>(g_p2 + Game::kPlayerShotTimer),
+           *reinterpret_cast<int32_t*>(g_p2 + Game::kPlayerRespawnTimer), g_p2[Game::kPlayerBombing],
+           *reinterpret_cast<void**>(g_p2 + Game::kPlayerShotFns), *reinterpret_cast<void**>(g_p2 + Game::kPlayerShotFns + 8),
+           *reinterpret_cast<void**>(g_p2 + Game::kPlayerBombFns),
+           *reinterpret_cast<void**>(Game::Player1() + Game::kPlayerShotFns),
+           *reinterpret_cast<void**>(Game::Player1() + Game::kPlayerShotFns + 8));
     if (g_listener.onSpawned) g_listener.onSpawned();
 }
 

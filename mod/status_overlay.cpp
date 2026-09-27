@@ -33,15 +33,27 @@ void Render(IDXGISwapChain* swapChain) {
         g_overlay->EndFrame();
         return;
     }
-    OverlayQuad light = { 0.02f, 0.03f, 0.010f, 0.010f, r, g, b, 0.9f };
+    // Glyph cells are 16px; at the 1456x816 window these are 1:1.
+    const float charW = 16.0f / 1456.0f, charH = 16.0f / 816.0f, lineStep = 0.024f;
+    int lines = 1;
+    size_t longest = 0, current = 0;
+    for (const char* c = text; *c; c++) {
+        if (*c == '\n') { lines++; current = 0; } else if (++current > longest) longest = current;
+    }
+    // A dark backing so white text reads on any background.
+    float boxW = 0.04f + charW * static_cast<float>(longest) + 0.01f;
+    float boxH = 0.012f + lineStep * static_cast<float>(lines);
+    OverlayQuad backing = { 0.01f + boxW * 0.5f, 0.012f + boxH * 0.5f, boxW * 0.5f, boxH * 0.5f, 0.0f, 0.0f, 0.0f, 0.55f };
+    g_overlay->DrawQuad(backing);
+    OverlayQuad light = { 0.025f, 0.03f, 0.009f, 0.016f, r, g, b, 0.95f };
     g_overlay->DrawQuad(light);
     TextRenderer_EnsureLoaded(*g_overlay);
-    float y = 0.022f;
+    float y = 0.02f;
     for (char* line = text; line && *line;) {
         char* next = strchr(line, '\n');
         if (next) *next++ = '\0';
-        DrawText(*g_overlay, line, 0.04f, y, 0.011f, 0.017f, 0.9f);
-        y += 0.022f;
+        DrawText(*g_overlay, line, 0.04f, y, charW, charH, 1.0f);
+        y += lineStep;
         line = next;
     }
     g_overlay->EndFrame();
