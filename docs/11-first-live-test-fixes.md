@@ -192,3 +192,39 @@ answer to that.
   from both players.
 - P1 bombs themselves show P1's own bomb; P2's bomb (P key) worked in the
   log but P2's bomb count in the status line wasn't checked.
+
+## Rollback self-test: the rest of the way to 0 failures (later the same day)
+
+Iterating with the user (short sync-test runs, one fix per run):
+
+- **Heap pointers, second thought.** The calibration-time rule "never
+  restore a heap pointer" stopped restoring the stage timeline's cursor
+  (a pointer into the loaded ECL), so a rewound stage skipped the spawns
+  its clock said were due. Dropped; library pointer blocks are denylisted
+  by address instead, the sync test still learns slots that re-simulate
+  to a different allocation, and the timeline cursor/jump target are
+  never learned.
+- **Sprite VMs drift cosmetically.** Animation scripts use the animation
+  manager's own random source (a heap object), so VM fields re-simulate
+  differently. P1's main VM, orb VMs and each shot's VM are excluded --
+  the shot's VM is at slot `+0x18` (type at `+0x10`, logical position at
+  `+0x13C`); an earlier `+8` excluded the in-use flag and lost every
+  shot on rewind.
+- **The screen shake is a heap task.** `FUN_140077890` allocates the
+  shake's state and a priority-0xE task node on the heap and inserts it
+  into the update list; its tick (`+0x77AB0`) writes the camera offsets
+  from the game's RNG. Neither allocation can be restored, so the tick
+  now runs on a private seed (`Detour_ScreenShakeTick`) and its outputs
+  (`0x53CAC0`, `0x549F78`, `0xC6E388`) are never restored.
+- **Library counters.** Sound-playback bookkeeping that a muted
+  re-simulation skips: `0x555000-0x556200` (channel flags) and the
+  library-only blocks `0x58E3BC-0x58E7E8`, `0x7E0098-0x7E3D6C`,
+  `0x7E60B0-0x7FAACC`, `0x9881D8-0x9886E8` (from MapLibraryData).
+- Diagnostics kept: full diff listings for the first failures that
+  touch checksummed state; the bullet manager's address (`0x436EF0`,
+  bullets at `+8`).
+
+Result: a stage with bombs, shakes and kills, 0 failures. One unexplained
+one-off remains from an earlier run: 34 bytes at `0x42F1B0` (floats at the
+player's position, small counters) present live but not re-simulated,
+eleven seconds after a bomb; referenced from no game code directly.
