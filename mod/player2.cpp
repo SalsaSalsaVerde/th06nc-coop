@@ -1,4 +1,5 @@
 #include "player2.h"
+#include "player_look.h"
 #include "anm_tables.h"
 #include "config.h"
 #include "coop_rules.h"
@@ -483,6 +484,7 @@ void Spawn() {
     // refills to); record P2's the same way.
     g_state.resources.respawnBombs = g_state.resources.bombs;
     g_active = true;
+    PlayerLook_OnStageStart();
     g_inputLogsLeft = 12;
     g_inputLogTimer = 0;
     ModLog("Player2: spawned at (%.1f, %.1f)", PosX(g_p2), PosY(g_p2));

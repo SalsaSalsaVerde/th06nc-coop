@@ -61,6 +61,7 @@ const int kAnmMaxIds = 0x800;
 const uintptr_t kFnAnmLoad = 0x2440;           // (unused, slot, path, baseId) -> 0 ok
 const uintptr_t kFnAnmUnload = 0x2BE0;         // (manager, slot)
 const uintptr_t kFnAnmSetScript = 0x2B40;      // (unused, vm, scriptId)
+const uintptr_t kFnAnmTick = 0x7020;           // (anmManager, vm) -> runs the VM's script one frame
 
 // Player sprites: the player init loads data/player00.anm (Reimu) or
 // player01.anm (Marisa) into slot 5 at base 0x420.
@@ -92,6 +93,8 @@ const uintptr_t kVmFlags = 0xC4;               // u32: drawn only if bits 1 and 
 const uintptr_t kVmPos = 0xC8;                 // float[3]
 const uintptr_t kVmScale = 0xE4;               // float[2]: x and y scale of the sprite
 const uintptr_t kVmColor = 0xEC;               // D3DCOLOR (B, G, R, A bytes); 0 = not drawn
+const uintptr_t kVmEndFlag = 0x8A;             // u16: set to 1 to make the script play its ending
+const uintptr_t kVmScriptPtr = 0xF8;           // current script instruction; null = not running
 const float kPlayerSpriteZ = 0.49f;            // the player draw's z for the main VM (0x3EFAE148)
 
 // Enemy bullet array (overlay/60): 640 slots of 0x620 bytes.
@@ -204,6 +207,10 @@ const uintptr_t kCrtUseFma3 = 0xABAB9C;        // int32
 
 // Heap objects holding simulation state, reached through a pointer global.
 const uintptr_t kGuiObjectPtr = 0xABAE28;      // dialogue/HUD state; gates bombing during dialogue
+// The focus marker (docs/13): two HUD sprite VMs the HUD tick moves onto
+// Player 1 and starts on scripts 0x641/0x642 while P1 holds focus.
+const uintptr_t kGuiFocusRingVm = 0x120;       // first of two VMs, 0x120 apart
+const int kAnmScriptFocusRing = 0x641;
 const size_t kGuiObjectSize = 0x4228;
 const size_t kGuiFpsValue = 0x3D4C;            // float, the "60.00fps" readout (real time, not simulation)
 

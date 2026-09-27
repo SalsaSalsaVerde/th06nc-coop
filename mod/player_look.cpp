@@ -156,65 +156,70 @@ uint64_t Detour_DrawSkipDowned(uint8_t* player, uint64_t secondArg) {
     return (*Original)(player, secondArg);
 }
 
-// ---- focus ring (overlay/39's recipe, drawn with the Present hook) ----------
+// ---- focus marker: the game's own, on P2 -------------------------------
+//
+// The HUD keeps two sprite VMs for the focus marker and, every frame, moves
+// them onto Player 1 (by absolute address) and starts scripts 0x641/0x642
+// on them while P1 holds focus, ending them when it stops (docs/13). P2
+// gets its own pair, run the same way, drawn after P2's overlay pass.
 
-// Game units -> fractions of the window (overlay/14, measured on the
-// 1456x816 window: playfield x 400-1060, y 20-790; 384x448 game units).
-const float kPlayfieldLeftFrac = 400.0f / 1456.0f;
-const float kPlayfieldTopFrac = 20.0f / 816.0f;
-const float kPlayfieldWidthFrac = 660.0f / 1456.0f;
-const float kPlayfieldHeightFrac = 770.0f / 816.0f;
-const float kGameWidth = 384.0f;
-const float kGameHeight = 448.0f;
+using AnmTickFn = int (*)(void* anmManager, uint8_t* vm);
+using SetScriptFn = void (*)(void* unused, uint8_t* vm, int scriptId);
 
-const int kRingRevealFrames = 18;
-const int kRingFadeFrames = 6;
-const int kRingDots = 12;
-const float kRingRadius = 10.0f; // game units, at scale 1
+struct FocusRing {
+    alignas(16) uint8_t vm[2][0x120];
+    bool initialized = false;
+};
+FocusRing g_p2Ring;
 
-int g_focusFrames[2] = { 0, 0 };
-
-float Interpolate(float from, float to, float t) {
-    if (t < 0.0f) t = 0.0f;
-    if (t > 1.0f) t = 1.0f;
-    return from + (to - from) * t;
+bool RingRunning(const uint8_t* vm) {
+    return *reinterpret_cast<void* const*>(vm + Game::kVmScriptPtr) != nullptr;
 }
 
-void ToScreen(float x, float y, float* outX, float* outY) {
-    *outX = kPlayfieldLeftFrac + (x / kGameWidth) * kPlayfieldWidthFrac;
-    *outY = kPlayfieldTopFrac + (y / kGameHeight) * kPlayfieldHeightFrac;
-}
-
-void Channels(uint32_t rgb, float* r, float* g, float* b) {
-    *r = static_cast<float>((rgb >> 16) & 0xFF) / 255.0f;
-    *g = static_cast<float>((rgb >> 8) & 0xFF) / 255.0f;
-    *b = static_cast<float>(rgb & 0xFF) / 255.0f;
-}
-
-void DrawRing(OverlayRenderer& overlay, float cx, float cy, float scale, float alpha, uint32_t rgb) {
-    float r, g, b;
-    Channels(rgb, &r, &g, &b);
-    for (int i = 0; i < kRingDots; i++) {
-        float angle = 6.2831853f * static_cast<float>(i) / static_cast<float>(kRingDots);
-        float sx, sy;
-        ToScreen(cx + kRingRadius * scale * cosf(angle), cy + kRingRadius * scale * sinf(angle), &sx, &sy);
-        overlay.DrawQuad(OverlayQuad{ sx, sy, 0.0030f, 0.0030f * 1456.0f / 816.0f, r, g, b, alpha });
+void UpdateAndDrawP2Ring(uint8_t* player) {
+    uint8_t* gui = *Game::At<uint8_t*>(Game::kGuiObjectPtr);
+    void* anm = *Game::At<void*>(Game::kAnmManagerPtr);
+    if (!gui || !anm) return;
+    if (!g_p2Ring.initialized) {
+        // The HUD's VMs as a template (sprite sheet, scale, color), minus
+        // whatever script they are running.
+        for (int i = 0; i < 2; i++) {
+            memcpy(g_p2Ring.vm[i], gui + Game::kGuiFocusRingVm + i * 0x120, 0x120);
+            *reinterpret_cast<void**>(g_p2Ring.vm[i] + Game::kVmScriptPtr) = nullptr;
+        }
+        g_p2Ring.initialized = true;
+    }
+    uint8_t state = player[Game::kPlayerState];
+    bool focused = g_settings.focusRing && player[Game::kPlayerFocused] && (state == 0 || state == 3) && Visible(player);
+    bool viewSet = false;
+    for (int i = 0; i < 2; i++) {
+        uint8_t* vm = g_p2Ring.vm[i];
+        if (focused && !RingRunning(vm)) {
+            Game::Fn<SetScriptFn>(Game::kFnAnmSetScript)(nullptr, vm, Game::kAnmScriptFocusRing + i);
+        } else if (!focused && RingRunning(vm)) {
+            *reinterpret_cast<uint16_t*>(vm + Game::kVmEndFlag) = 1;
+        }
+        if (!RingRunning(vm)) continue;
+        float* pos = reinterpret_cast<float*>(vm + Game::kVmPos);
+        pos[0] = Pos(player)[0];
+        pos[1] = Pos(player)[1];
+        Game::Fn<AnmTickFn>(Game::kFnAnmTick)(anm, vm);
+        if (!RingRunning(vm)) continue;
+        if (!viewSet) {
+            Game::Fn<SetViewFn>(Game::kFnSetPlayfieldView)(Game::At<void>(Game::kPlayfieldView), 0.0f,
+                                                          *Game::At<float>(Game::kConstHalf), 0);
+            viewSet = true;
+        }
+        Game::Fn<DrawVmFn>(Game::kFnDrawVm)(0, vm, 1);
     }
 }
 
-// The hitbox itself: a white square the size of the hit radius, on a dark
-// one slightly larger so it reads on any background.
-void DrawHitbox(OverlayRenderer& overlay, uint8_t* player, float alpha) {
-    float radius = *reinterpret_cast<float*>(player + Game::kPlayerHitRadius);
-    if (!(radius >= 1.0f)) radius = 1.0f;
-    if (radius > 8.0f) radius = 8.0f;
-    float sx, sy;
-    ToScreen(Pos(player)[0], Pos(player)[1], &sx, &sy);
-    float hw = radius / kGameWidth * kPlayfieldWidthFrac;
-    float hh = radius / kGameHeight * kPlayfieldHeightFrac;
-    float border = 1.0f / kGameWidth * kPlayfieldWidthFrac;
-    overlay.DrawQuad(OverlayQuad{ sx, sy, hw + border, hh + border * 1456.0f / 816.0f, 0.1f, 0.1f, 0.1f, alpha });
-    overlay.DrawQuad(OverlayQuad{ sx, sy, hw, hh, 1.0f, 1.0f, 1.0f, alpha });
+uint64_t Detour_DrawOverlay(uint8_t* player, uint64_t secondArg) {
+    int index = PlayerIndex(player);
+    if (index >= 0 && CoopRules_IsDowned(player)) return 1;
+    uint64_t result = g_origDrawOverlay(player, secondArg);
+    if (index == 1 && Player2_IsActive()) UpdateAndDrawP2Ring(player);
+    return result;
 }
 
 } // namespace
@@ -229,7 +234,7 @@ bool PlayerLook_Install() {
     const HookSpec hooks[] = {
         { Game::kFnPlayerDrawBombFlash, reinterpret_cast<void*>(&Detour_DrawSkipDowned<&g_origDrawBombFlash>), reinterpret_cast<void**>(&g_origDrawBombFlash), "PlayerDrawBombFlash" },
         { Game::kFnPlayerDraw, reinterpret_cast<void*>(&Detour_Draw), reinterpret_cast<void**>(&g_origDraw), "PlayerDraw" },
-        { Game::kFnPlayerDrawOverlay, reinterpret_cast<void*>(&Detour_DrawSkipDowned<&g_origDrawOverlay>), reinterpret_cast<void**>(&g_origDrawOverlay), "PlayerDrawOverlay" },
+        { Game::kFnPlayerDrawOverlay, reinterpret_cast<void*>(&Detour_DrawOverlay), reinterpret_cast<void**>(&g_origDrawOverlay), "PlayerDrawOverlay" },
     };
     bool ok = true;
     for (const HookSpec& h : hooks) {
@@ -242,29 +247,15 @@ void PlayerLook_SetSettings(const LookSettings& settings) {
     g_settings = settings;
 }
 
+void PlayerLook_OnStageStart() {
+    g_p2Ring.initialized = false;
+}
+
 const LookSettings& PlayerLook_Settings() {
     return g_settings;
 }
 
-void PlayerLook_DrawOverlay(OverlayRenderer& overlay) {
-    if (!g_settings.focusRing || !Player2_IsActive()) {
-        g_focusFrames[0] = g_focusFrames[1] = 0;
-        return;
-    }
-    for (int index = 0; index < 2; index++) {
-        uint8_t* player = PlayerByIndex(index);
-        uint8_t state = player[Game::kPlayerState];
-        bool show = IsOther(index) || Netplay_LocalPlayerIndex() < 0; // same machine: both are someone's "other"
-        if (!show || !Visible(player) || (state != 0 && state != 3) || !player[Game::kPlayerFocused]) {
-            g_focusFrames[index] = 0;
-            continue;
-        }
-        int frames = ++g_focusFrames[index];
-        float alpha = Interpolate(0.0f, 0.9f, static_cast<float>(frames) / kRingFadeFrames);
-        float reveal = static_cast<float>(frames) / kRingRevealFrames;
-        uint32_t rgb = ColorOf(index);
-        DrawRing(overlay, Pos(player)[0], Pos(player)[1], Interpolate(1.5f, 1.0f, reveal), alpha, rgb);
-        DrawRing(overlay, Pos(player)[0], Pos(player)[1], Interpolate(0.3f, 1.0f, reveal), alpha, rgb);
-        DrawHitbox(overlay, player, alpha);
-    }
+void PlayerLook_DrawOverlay(OverlayRenderer&) {
+    // Nothing: the focus marker is the game's own now (above). Kept so the
+    // Present hook's drawer list stays as it is.
 }

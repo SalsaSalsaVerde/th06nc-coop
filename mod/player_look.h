@@ -14,7 +14,7 @@ struct LookSettings {
     uint32_t p2Color = 0xA0C8FF; // same-machine play: P2's tint
     bool proximityFade = true;
     bool outline = true; // a halo in the player's color behind the faded sprite (docs/11)
-    bool focusRing = true;
+    bool focusRing = true; // the game's own focus marker, on P2 too
     float outlineDepthOffset = 0.0f; // z offset of the halo (the pipeline ignores depth; kept for experiments)
 };
 
@@ -24,5 +24,10 @@ bool PlayerLook_Install();
 void PlayerLook_SetSettings(const LookSettings& settings);
 const LookSettings& PlayerLook_Settings();
 
-// Draws the focus rings; called from the Present hook with a frame begun.
+// Called at every P2 spawn: the HUD object the focus marker copies from is
+// re-created per stage.
+void PlayerLook_OnStageStart();
+
+// Present-hook drawer; draws nothing now (the focus marker is drawn by the
+// game's own sprite pipeline).
 void PlayerLook_DrawOverlay(OverlayRenderer& overlay);
