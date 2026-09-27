@@ -774,6 +774,8 @@ void SyncTestCalibrateTick() {
 // mismatch means some simulation state isn't captured by snapshots (heap
 // state, a missed region) or isn't deterministic; the logged addresses say
 // where.
+int g_gameplayFailureDetails = 3; // failures touching gameplay state get full diff listings
+
 void RunSyncCheck() {
     int from = g_frame - Cfg().syncTestDistance;
     if (!Snapshot_Has(from) || g_listSignature[from % kRing] != Chain_Signature()) {
@@ -792,7 +794,13 @@ void RunSyncCheck() {
     }
 
     g_syncTestStats.checks++;
-    size_t differing = Snapshot_CompareLive(g_frame, g_syncTestStats.failures < 5 ? 12 : 0, true);
+    GameChecksum resimulated = Checksum_Compute(Player2_IsActive() ? Player2_Struct() : nullptr);
+    bool gameplayDiffers = memcmp(resimulated.region, reference.region, sizeof(reference.region)) != 0;
+    int report = 0;
+    if (gameplayDiffers && g_gameplayFailureDetails > 0) report = 40; // the ones that matter, in full
+    else if (g_syncTestStats.failures < 5) report = 12;
+    size_t differing = Snapshot_CompareLive(g_frame, report, true);
+    if (gameplayDiffers && differing) g_gameplayFailureDetails--;
     if (differing == 0) {
         if (g_syncTestStats.checks == 1 || g_syncTestStats.checks % 100 == 0) {
             ModLog("SyncTest: frame %d OK (%d checks so far)", g_frame, g_syncTestStats.checks);
@@ -800,7 +808,7 @@ void RunSyncCheck() {
         return;
     }
     g_syncTestStats.failures++;
-    GameChecksum after = Checksum_Compute(Player2_IsActive() ? Player2_Struct() : nullptr);
+    const GameChecksum& after = resimulated;
     char regions[256] = {};
     for (int r = 0; r < kChecksumRegionCount; r++) {
         if (reference.region[r] != after.region[r]) {

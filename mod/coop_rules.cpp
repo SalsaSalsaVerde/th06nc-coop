@@ -331,23 +331,48 @@ void CoopRules_OnSceneInit(bool coopActive) {
     g_startPointPending = g_settings.startPoint != kStartAtStage;
 }
 
-// The timeline record to continue from for the midboss start: the last
-// enemy spawn before the first "wait for enemy" record that comes before
-// the boss dialogue. Null if the stage has no such section.
-const int16_t* FindMidbossRecord() {
+// Stage 1's timeline (docs/12) shows how a midboss looks: one spawn
+// (2498: sub 20) followed by a thousand frames with no record at all,
+// while ordinary waves come every few frames. So a "section" is a spawn
+// record followed by a silence of at least kSectionGap frames, and the
+// midboss is the section start with the longest silence before the boss
+// intro. The boss is the first intro record (opcode 8) -- stage 1 has no
+// 0xD marker.
+const int kSectionGap = 300;
+
+const int16_t* NextRecord(const int16_t* record) {
+    if (record[3] <= 0) return nullptr;
+    return reinterpret_cast<const int16_t*>(reinterpret_cast<const uint8_t*>(record) + record[3]);
+}
+
+const int16_t* FindBossRecord() {
     const int16_t* record = *Game::At<const int16_t*>(Game::kTimelineStart);
-    if (!record) return nullptr;
-    const int16_t* lastSpawn = nullptr;
-    int scanned = 0;
-    for (; record[0] >= 0 && scanned < 4096; scanned++) {
-        int16_t opcode = record[2];
-        if (opcode == Game::kTimelineOpBossIntro || opcode == Game::kTimelineOpBossMarker) return nullptr;
-        if (opcode == Game::kTimelineOpWaitEnemy) return lastSpawn;
-        if (opcode >= 0 && opcode <= Game::kTimelineOpSpawnLast) lastSpawn = record;
-        if (record[3] <= 0) return nullptr;
-        record = reinterpret_cast<const int16_t*>(reinterpret_cast<const uint8_t*>(record) + record[3]);
+    for (int scanned = 0; record && record[0] >= 0 && scanned < 4096; scanned++, record = NextRecord(record)) {
+        if (record[2] == Game::kTimelineOpBossIntro || record[2] == Game::kTimelineOpBossMarker) return record;
     }
     return nullptr;
+}
+
+const int16_t* FindMidbossRecord() {
+    const int16_t* record = *Game::At<const int16_t*>(Game::kTimelineStart);
+    const int16_t* best = nullptr;
+    int bestGap = 0;
+    for (int scanned = 0; record && record[0] >= 0 && scanned < 4096; scanned++) {
+        if (record[2] == Game::kTimelineOpBossIntro || record[2] == Game::kTimelineOpBossMarker) break;
+        const int16_t* next = NextRecord(record);
+        if (!next) break;
+        bool spawn = record[2] >= 0 && record[2] <= Game::kTimelineOpSpawnLast;
+        int gap = next[0] >= 0 ? next[0] - record[0] : 0;
+        if (spawn && gap >= kSectionGap) {
+            ModLog("Timeline: section at time %d (sub %d), then %d silent frames", record[0], record[1], gap);
+            if (gap > bestGap) {
+                bestGap = gap;
+                best = record;
+            }
+        }
+        record = next;
+    }
+    return best;
 }
 
 // Logs the stage's timeline (time/opcode/arg per record) once per stage,
@@ -383,7 +408,7 @@ void CoopRules_AfterSceneInit() {
     const int16_t* record = nullptr;
     const char* name = "";
     if (g_settings.startPoint == kStartAtBoss) {
-        record = *target; // set by the scene init: the first boss marker
+        record = FindBossRecord();
         name = "boss";
     } else if (g_settings.startPoint == kStartAtMidboss) {
         record = FindMidbossRecord();
