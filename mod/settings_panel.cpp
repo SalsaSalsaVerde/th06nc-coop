@@ -420,14 +420,17 @@ void SettingsPanel_Draw(OverlayRenderer& overlay) {
     if (!g_open) return;
     TextRenderer_EnsureLoaded(overlay);
 
-    const float left = 0.20f;
-    const float top = 0.16f;
-    const float charW = 16.0f / 1456.0f; // one glyph cell = 16px at the 1456x816 window
-    const float charH = 16.0f / 816.0f;
-    const float lineStep = 0.029f;
-    const float valueX = left + 0.34f;
-    float height = lineStep * (kItemCount + 6);
-    overlay.DrawQuad(OverlayQuad{ 0.5f, top + height * 0.5f - 0.02f, 0.33f, height * 0.5f + 0.02f, 0.03f, 0.03f, 0.08f, 0.85f });
+    // One glyph cell = 20px at the 1456x816 window; sized so the longest
+    // label ("> LOCAL 2-PLAYER (THIS PC)") and value fit side by side and
+    // all items fit between 6% and 93% of the window height.
+    const float left = 0.13f;
+    const float top = 0.06f;
+    const float charW = 20.0f / 1456.0f;
+    const float charH = 20.0f / 816.0f;
+    const float lineStep = 0.034f;
+    const float valueX = left + 0.38f;
+    float height = lineStep * (kItemCount + 5);
+    overlay.DrawQuad(OverlayQuad{ 0.5f, top + height * 0.5f - 0.02f, 0.39f, height * 0.5f + 0.02f, 0.03f, 0.03f, 0.08f, 0.85f });
 
     DrawText(overlay, "CO-OP SETTINGS", left, top, charW * 1.5f, charH * 1.5f, 1.0f, 1.0f, 0.9f, 0.6f);
     const char* who = IsGuest() ? "RULES ARE SET BY THE HOST" : (Online() ? "YOU ARE THE HOST: THESE ARE THE RULES" : "PLAYING ON THIS PC");

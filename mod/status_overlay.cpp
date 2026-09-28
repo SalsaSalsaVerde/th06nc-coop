@@ -24,10 +24,10 @@ int g_recursionDepth = 0;
 // The playfield starts about 27% of the way across the window (overlay/14:
 // x 400/1456), and the boss's HP bar runs along its top, so both text
 // blocks stay inside the left margin: small glyphs, lines wrapped to fit.
-const float kCharW = 13.0f / 1456.0f;
-const float kCharH = 13.0f / 816.0f;
-const float kLineStep = 0.020f;
-const int kMaxColumns = 24;
+const float kCharW = 11.0f / 1456.0f;
+const float kCharH = 11.0f / 816.0f;
+const float kLineStep = 0.017f;
+const int kMaxColumns = 26;
 const float kLeft = 0.012f;
 
 // Word-wraps `in` into `out` so no line is longer than kMaxColumns.
