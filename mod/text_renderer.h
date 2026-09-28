@@ -2,21 +2,13 @@
 
 #include "overlay_renderer.h"
 
-// Draws ASCII text using the game's own bitmap font (docs/51), extracted
-// from `data/ascii/ascii.dds` (th06IN.dat) the same way every other sprite
-// in this project is extracted (docs/22's pkgl_extract.py) -- not a custom
-// font, the exact glyphs the game itself uses for its own UI text.
+// Draws ASCII text in the game's own UI font, which it reads out of the
+// game's archives at runtime (docs/16) -- not a copy shipped with the mod.
+// Monospaced cells, left to right, no kerning; characters outside
+// 0x20-0x7E advance as a blank.
 //
-// Monospaced (the source sheet is a plain 16x16-per-cell grid, one cell per
-// printable ASCII code 0x20 ' ' through 0x7E '~"), left-to-right, no
-// wrapping/kerning. Unsupported characters (outside 0x20-0x7E) are drawn as
-// a blank advance (skipped, cursor still moves) rather than a fallback
-// glyph -- fine for this mod's own short status/debug strings, which are
-// plain ASCII by construction.
-//
-// Call once after OverlayRenderer::EnsureInitialized has run (needs a live
-// device) to create the font texture; safe to call every frame; only
-// creates the texture once.
+// Call after OverlayRenderer::EnsureInitialized has run; safe every frame
+// (loads once, retrying for a few seconds if the archives aren't open yet).
 void TextRenderer_EnsureLoaded(OverlayRenderer& overlay);
 
 // Draws `text` starting with its top-left corner at (xFrac, yFrac) (screen-

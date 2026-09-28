@@ -58,7 +58,10 @@ const size_t kAnmSpriteEntrySize = 0x40;
 const uintptr_t kAnmScriptBases = 0x20F90;     // int32 per ID
 const uintptr_t kAnmScripts = 0x23090;         // script pointer per ID
 const int kAnmMaxIds = 0x800;
-const uintptr_t kFnAnmLoad = 0x2440;           // (unused, slot, path, baseId) -> 0 ok
+const uintptr_t kFnAnmLoad = 0x2440;
+// (path, fromDisk = 0, uint32 *outSize) -> malloc'd copy of the archive file
+// with that file name (decrypted, decompressed), or 0 -- the anm loader's read.
+const uintptr_t kFnReadArchiveFile = 0x3A0C0;           // (unused, slot, path, baseId) -> 0 ok
 const uintptr_t kFnAnmUnload = 0x2BE0;         // (manager, slot)
 const uintptr_t kFnAnmSetScript = 0x2B40;      // (unused, vm, scriptId)
 const uintptr_t kFnAnmTick = 0x7020;           // (anmManager, vm) -> runs the VM's script one frame

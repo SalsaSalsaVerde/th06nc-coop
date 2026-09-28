@@ -58,6 +58,11 @@ public:
     // Returns a texture with a null SRV on failure.
     SpriteTexture CreateSpriteTexture(unsigned int width, unsigned int height, const unsigned char* rgba);
 
+    // Same, from data already in a GPU format (a DDS payload: BC7, BC3, ...),
+    // with the given bytes per row (per row of 4x4 blocks for BCn).
+    SpriteTexture CreateTextureFromData(unsigned int width, unsigned int height, DXGI_FORMAT format,
+                                        const void* data, unsigned int rowPitch);
+
 private:
     bool CreateDeviceResources();
     void FlushQuads();

@@ -255,6 +255,37 @@ SpriteTexture OverlayRenderer::CreateSpriteTexture(unsigned int width, unsigned 
     return tex;
 }
 
+SpriteTexture OverlayRenderer::CreateTextureFromData(unsigned int width, unsigned int height, DXGI_FORMAT format,
+                                                    const void* data, unsigned int rowPitch) {
+    SpriteTexture tex;
+    if (!m_device || width == 0 || height == 0 || !data) return tex;
+
+    D3D11_TEXTURE2D_DESC desc = {};
+    desc.Width = width;
+    desc.Height = height;
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.Format = format;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_IMMUTABLE;
+    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+    D3D11_SUBRESOURCE_DATA initData = {};
+    initData.pSysMem = data;
+    initData.SysMemPitch = rowPitch;
+
+    ID3D11Texture2D* texture = nullptr;
+    if (FAILED(m_device->CreateTexture2D(&desc, &initData, &texture))) {
+        return tex;
+    }
+    HRESULT hr = m_device->CreateShaderResourceView(texture, nullptr, &tex.srv);
+    texture->Release();
+    if (FAILED(hr)) {
+        tex.srv = nullptr;
+    }
+    return tex;
+}
+
 void OverlayRenderer::DrawSprite(const OverlaySprite& sprite) {
     if (!m_deviceResourcesReady || !m_sizeResourcesReady) return;
     if (!sprite.texture.srv) return;
