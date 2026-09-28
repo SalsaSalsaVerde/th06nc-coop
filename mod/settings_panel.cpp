@@ -41,6 +41,7 @@ enum Item {
     kItemTargeting,
     kItemResources,
     kItemRevive,
+    kItemRevivePower,
     kItemP1Lives,
     kItemP1Bombs,
     kItemP2Lives,
@@ -88,6 +89,7 @@ bool Editable(int item) {
         case kItemP2Character:
             return !Online();
         case kItemRevive:
+        case kItemRevivePower:
         case kItemP2Lives:
         case kItemP2Bombs:
             return !IsGuest() && !CoopRules_Settings().sharedResources;
@@ -143,6 +145,16 @@ int16_t StepPower(int16_t value, int dir) {
     return steps[(index + dir + count) % count];
 }
 
+// Before going down (-1), then the game's shot-power tiers (the table at
+// 0x34E150): 0 8 16 32 48 64 80 96 128.
+int16_t StepRevivePower(int16_t value, int dir) {
+    const int16_t steps[] = { -1, 0, 8, 16, 32, 48, 64, 80, 96, 128 };
+    const int count = sizeof(steps) / sizeof(steps[0]);
+    int index = 0;
+    while (index + 1 < count && steps[index + 1] <= value) index++;
+    return steps[(index + dir + count) % count];
+}
+
 void FormatStock(char* out, size_t size, int8_t value) {
     if (value < 0) snprintf(out, size, "GAME'S OPTION");
     else snprintf(out, size, "%d", value);
@@ -162,12 +174,18 @@ void Describe(int item, char* label, size_t labelSize, char* value, size_t value
             snprintf(value, valueSize, "%s", names[s.startPoint >= 0 && s.startPoint <= kStartAtBoss ? s.startPoint : 0]);
             break;
         }
+        case kItemRevivePower:
+            snprintf(label, labelSize, "POWER AFTER REVIVE");
+            if (s.sharedResources) snprintf(value, valueSize, "(PER PLAYER ONLY)");
+            else if (s.revivePower < 0) snprintf(value, valueSize, "BEFORE GOING DOWN");
+            else if (s.revivePower >= 128) snprintf(value, valueSize, "MAX (128)");
+            else snprintf(value, valueSize, "%d", s.revivePower);
+            break;
         case kItemNetcode:
         case kItemInputDelay: {
             bool rollback = Netplay_OwnRollback();
             int delay = Netplay_OwnInputDelay();
-            bool hostsOwn = IsGuest() && Netplay_HostNetcode(&rollback, &delay);
-            (void)hostsOwn;
+            if (IsGuest()) Netplay_HostNetcode(&rollback, &delay); // shown greyed: the host's apply
             if (item == kItemNetcode) {
                 snprintf(label, labelSize, "NETCODE");
                 snprintf(value, valueSize, "%s", rollback ? "ROLLBACK" : "LOCKSTEP");
@@ -262,6 +280,7 @@ void Change(int item, int dir) {
         case kItemStartStage: s.startStage = static_cast<int8_t>(StepInt(s.startStage, dir, 1, 6)); break;
         case kItemStartPoint: s.startPoint = static_cast<int8_t>(StepInt(s.startPoint, dir, 0, kStartAtBoss)); break;
         case kItemStartPower: s.startPower = StepPower(s.startPower, dir); break;
+        case kItemRevivePower: s.revivePower = StepRevivePower(s.revivePower, dir); break;
         case kItemInvincible: s.invincible = !s.invincible; break;
         case kItemTargeting: s.targeting = static_cast<uint8_t>(StepInt(s.targeting, dir, 0, kTargetAlternate)); break;
         case kItemResources: s.sharedResources = !s.sharedResources; break;
@@ -327,6 +346,8 @@ void Save() {
     WriteInt("coop", "p2_start_lives", s.startLives[1]);
     WriteInt("coop", "p2_start_bombs", s.startBombs[1]);
     WriteInt("coop", "start_power", s.startPower);
+    if (s.revivePower < 0) WriteString("coop", "revive_power", "last");
+    else WriteInt("coop", "revive_power", s.revivePower);
     WriteInt("coop", "start_stage", s.startStage);
     const char* points[] = { "stage", "midboss", "boss" };
     WriteString("coop", "start_point", points[s.startPoint >= 0 && s.startPoint <= kStartAtBoss ? s.startPoint : 0]);
@@ -403,7 +424,7 @@ void SettingsPanel_Draw(OverlayRenderer& overlay) {
     const float top = 0.16f;
     const float charW = 16.0f / 1456.0f; // one glyph cell = 16px at the 1456x816 window
     const float charH = 16.0f / 816.0f;
-    const float lineStep = 0.032f;
+    const float lineStep = 0.029f;
     const float valueX = left + 0.34f;
     float height = lineStep * (kItemCount + 6);
     overlay.DrawQuad(OverlayQuad{ 0.5f, top + height * 0.5f - 0.02f, 0.33f, height * 0.5f + 0.02f, 0.03f, 0.03f, 0.08f, 0.85f });

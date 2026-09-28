@@ -25,6 +25,7 @@ struct Config {
 
     CoopSettings coop; // [coop]; online, the host's are used
     LookSettings look; // [visual]; each machine its own (colors are exchanged)
+    bool bossDps = true; // [visual] boss_dps: the DPS meter in the bottom-left during bosses
 
     bool netplayRollback = true; // false = delay-based lockstep
     int netplayInputDelay = 2;   // frames between pressing a button and it taking effect
@@ -36,6 +37,7 @@ struct Config {
     bool syncTest = false;
     int syncTestDistance = 4;
     int syncTestInterval = 10;
+    bool syncTestPerturb = false; // [synctest] perturb: first re-run each window on wrong inputs (docs/15)
 };
 
 void Config_Load();

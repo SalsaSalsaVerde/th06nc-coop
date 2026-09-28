@@ -51,6 +51,7 @@ struct Player2State {
 static_assert(sizeof(Player2State::player) >= Game::kPlayerStructSize, "P2 buffer too small");
 
 Player2State g_state;
+const uint8_t kItemOwnerNone = 0xFF; // itemOwner: not homing / nobody yet
 uint8_t* const g_p2 = g_state.player;
 
 enum NodeIndex { kNodeUpdate, kNodeDrawBombFlash, kNodeDraw, kNodeDrawOverlay, kNodeCount };
@@ -472,7 +473,7 @@ void Spawn() {
     memset(g_state.grazedBullets, 0, sizeof(g_state.grazedBullets));
     g_state.lastItemCollector = 0;
     g_state.itemCollectorToggle = 0;
-    memset(g_state.itemOwner, 0, sizeof(g_state.itemOwner));
+    memset(g_state.itemOwner, kItemOwnerNone, sizeof(g_state.itemOwner));
     // A run starts with score 0 (a continue sets it to the continue count),
     // so that's when P2's own resources start fresh -- from P1's, which the
     // game just set to the starting values. Later stages keep them.
@@ -599,10 +600,14 @@ uint64_t Detour_LaserHitTest(uint64_t unused, float* pos, float* size, float* or
 // keeps P2's homing target updated the same way the enemy loop updates P1's.
 int Detour_ShotDamage(uint8_t* player, float* enemyPos, float* enemySize, uint8_t* outBombFlag) {
     int damage = g_origShotDamage(player, enemyPos, enemySize, outBombFlag);
-    if (!g_active || g_swapped || !IsPlayer1(player)) return damage;
+    if (g_swapped || !IsPlayer1(player)) return damage;
+    CoopRules_RecordShotDamage(0, damage, enemyPos);
+    if (!g_active) return damage;
 
     uint8_t p2BombFlag = 0;
-    damage += g_origShotDamage(g_p2, enemyPos, enemySize, outBombFlag ? &p2BombFlag : nullptr);
+    int p2Damage = g_origShotDamage(g_p2, enemyPos, enemySize, outBombFlag ? &p2BombFlag : nullptr);
+    CoopRules_RecordShotDamage(1, p2Damage, enemyPos);
+    damage += p2Damage;
     if (outBombFlag && p2BombFlag) *outBombFlag = 1;
 
     float* lastHit = reinterpret_cast<float*>(g_p2 + Game::kPlayerLastEnemyHit);
@@ -718,8 +723,10 @@ uint64_t Detour_EnemyScript(void* scriptManager, uint8_t* enemy) {
 // ---- items ----------------------------------------------------------------
 
 // Items home toward "the player" (P1's absolute fields) once that player is
-// above the collection line or invulnerable (respawning, bombing), and are
-// collected by touching its hurtbox. The native update runs over the whole
+// above the collection line (in state 0 or 3), and are collected by touching
+// its hurtbox. Being invulnerable alone does not attract items (the native
+// test is only the line, FUN_140044240); items born homing (bomb-cancelled
+// bullets) come out of the spawn already in state 1. The native update runs over the whole
 // pool as one player; the mod runs it twice (docs/14):
 //   1. as this frame's collector, over every item except those already
 //      homing to the other player: loose items move once, can be touched by
@@ -731,8 +738,20 @@ uint64_t Detour_EnemyScript(void* scriptManager, uint8_t* enemy) {
 // one player's auto-collect no longer locks the partner out of the rest.
 bool QualifiesForAutoCollect(const uint8_t* player) {
     uint8_t state = StateOf(player);
-    if (state == 3) return true;
-    return state == 0 && PosY(player) < *Game::At<float>(Game::kConstItemCollectLine);
+    return (state == 0 || state == 3) && PosY(player) < *Game::At<float>(Game::kConstItemCollectLine);
+}
+
+
+// A homing item nobody has claimed yet (it was spawned homing): the nearer
+// player gets it.
+uint8_t NearerPlayer(const uint8_t* item) {
+    const float* pos = reinterpret_cast<const float*>(item + 0x10);
+    float d1x = PosX(Game::Player1()) - pos[0], d1y = PosY(Game::Player1()) - pos[1];
+    float d2x = PosX(g_p2) - pos[0], d2y = PosY(g_p2) - pos[1];
+    bool p2Out = StateOf(g_p2) == 1 || StateOf(g_p2) == 2;
+    bool p1Out = StateOf(Game::Player1()) == 1 || StateOf(Game::Player1()) == 2;
+    if (p1Out != p2Out) return p1Out ? 1 : 0;
+    return d2x * d2x + d2y * d2y < d1x * d1x + d1y * d1y ? 1 : 0;
 }
 
 uint8_t ChooseItemCollector() {
@@ -785,7 +804,12 @@ uint64_t Detour_ItemUpdate(void* itemManager) {
     uint8_t collector = ChooseItemCollector();
     uint8_t other = collector ^ 1;
     static bool wasHoming[Game::kItemSlots];
-    for (int i = 0; i < Game::kItemSlots; i++) wasHoming[i] = ItemHoming(ItemAt(i));
+    for (int i = 0; i < Game::kItemSlots; i++) {
+        const uint8_t* item = ItemAt(i);
+        wasHoming[i] = ItemHoming(item);
+        if (item[0] == 0) g_state.itemOwner[i] = kItemOwnerNone;
+        else if (wasHoming[i] && g_state.itemOwner[i] == kItemOwnerNone) g_state.itemOwner[i] = NearerPlayer(item);
+    }
 
     uint32_t activeCount = 0;
     uint64_t result = ItemPass(itemManager, collector, [&](int i, const uint8_t*) {
@@ -795,6 +819,7 @@ uint64_t Detour_ItemUpdate(void* itemManager) {
     for (int i = 0; i < Game::kItemSlots; i++) {
         const uint8_t* item = ItemAt(i);
         if (!wasHoming[i] && ItemHoming(item)) g_state.itemOwner[i] = collector;
+        if (!ItemHoming(item) && item[0] != 0) g_state.itemOwner[i] = kItemOwnerNone;
         if (wasHoming[i] && g_state.itemOwner[i] == other && item[0] != 0) anyForOther = true;
     }
     if (anyForOther) {

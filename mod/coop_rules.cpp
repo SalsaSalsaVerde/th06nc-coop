@@ -6,6 +6,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 
 namespace {
 
@@ -17,12 +18,20 @@ PlayerFn g_origPlayerUpdate = nullptr;
 CoopSettings g_settings;
 CoopSettings g_ownSettings;
 
+const int kDpsWindow = 180; // frames the meter averages over (3 s)
+
 struct RulesState {
     int32_t lastScaledMaxHp; // boss max HP after our last scaling; -1 = none
     uint8_t downed[2];       // P1, P2
     uint8_t lastGameOver;
     uint8_t lastContinues;   // the game's continues-used counter, last frame
     int32_t reviveTimer;
+    uint32_t lastAlivePower[2]; // each player's power the last frame they were in play
+    // Boss damage per player per frame, a ring over the last kDpsWindow frames.
+    int32_t bossDamage[kDpsWindow][2];
+    int32_t bossDamageSlot;
+    int32_t bossFrames;   // frames the current boss has been up
+    int32_t noBossFrames; // frames since a boss was last up
 };
 RulesState g_state = { -1, { 0, 0 }, 0, 0, 0 };
 int g_bombLogsLeft = 20;
@@ -115,7 +124,9 @@ void ParkDowned(uint8_t* player) {
 }
 
 // Lives are set to 1 and the death counter past its end, so the next update
-// takes the native respawn branch (which spends that life).
+// takes the native respawn branch (which spends that life). Power comes back
+// per the revivePower setting. Runs from P1's update, before it, where the
+// resource globals hold P1's own pool.
 void Revive(int index, uint8_t lives) {
     uint8_t* player = PlayerByIndex(index);
     g_state.downed[index] = 0;
@@ -123,16 +134,38 @@ void Revive(int index, uint8_t lives) {
     player[Game::kPlayerOutFlag] = 0;
     *reinterpret_cast<int32_t*>(player + Game::kPlayerRespawnTimer) = 0;
     *reinterpret_cast<int32_t*>(player + Game::kPlayerDeathCounter) = 0x1E;
+    uint32_t power = g_settings.revivePower < 0 ? g_state.lastAlivePower[index]
+                                                : static_cast<uint32_t>(g_settings.revivePower);
+    if (power > 128) power = 128;
     if (index == 0) {
         *Game::At<uint8_t>(Game::kLives) = lives;
+        *Game::At<uint32_t>(Game::kPower) = power;
     } else {
         Player2_Resources()->lives = lives;
+        Player2_Resources()->power = power;
     }
-    ModLog("CoopRules: P%d revived", index + 1);
+    uint32_t* hud = Game::At<uint32_t>(Game::kHudDirtyFlags);
+    *hud = (*hud & ~0x15u) | 0x2Au; // lives, bombs, power changed
+    ModLog("CoopRules: P%d revived (power %u)", index + 1, power);
+}
+
+// Boss DPS: one ring slot per frame, advanced from P1's update.
+void TickBossDamage() {
+    if (FindBossSlot()) {
+        g_state.noBossFrames = 0;
+        g_state.bossFrames++;
+    } else if (++g_state.noBossFrames > 60 && g_state.bossFrames != 0) {
+        g_state.bossFrames = 0;
+        memset(g_state.bossDamage, 0, sizeof(g_state.bossDamage));
+    }
+    g_state.bossDamageSlot = (g_state.bossDamageSlot + 1) % kDpsWindow;
+    g_state.bossDamage[g_state.bossDamageSlot][0] = 0;
+    g_state.bossDamage[g_state.bossDamageSlot][1] = 0;
 }
 
 // Runs once per frame, from P1's update call (P1's node always exists).
 void TickRevive() {
+    TickBossDamage();
     uint8_t gameOver = GameOverFlag();
     uint8_t continues = *Game::At<uint8_t>(Game::kContinuesUsed);
     bool continued = continues > g_state.lastContinues;
@@ -199,6 +232,11 @@ uint64_t Detour_PlayerUpdate(uint8_t* player, uint64_t secondArg) {
 
     uint8_t gameOverBefore = GameOverFlag();
     uint8_t bombingBefore = player[Game::kPlayerBombing];
+    // In play (normal or invulnerable): remember the power -- inside P2's
+    // update the resource globals hold P2's pool (player2.cpp ResourceScope).
+    if (player[Game::kPlayerState] == 0 || player[Game::kPlayerState] == 3) {
+        g_state.lastAlivePower[index] = *Game::At<uint32_t>(Game::kPower);
+    }
     uint32_t inputNow = *Game::At<uint32_t>(Game::kInputCurrent);
     uint32_t inputBefore = *Game::At<uint32_t>(Game::kInputPrevious);
     uint64_t result = g_origPlayerUpdate(player, secondArg);
@@ -250,7 +288,35 @@ bool CoopSettings_Equal(const CoopSettings& a, const CoopSettings& b) {
            a.sharedResources == b.sharedResources && a.reviveSeconds == b.reviveSeconds &&
            a.startLives[0] == b.startLives[0] && a.startLives[1] == b.startLives[1] &&
            a.startBombs[0] == b.startBombs[0] && a.startBombs[1] == b.startBombs[1] &&
-           a.startPower == b.startPower && a.startStage == b.startStage && a.startPoint == b.startPoint;
+           a.startPower == b.startPower && a.startStage == b.startStage && a.startPoint == b.startPoint &&
+           a.revivePower == b.revivePower;
+}
+
+void CoopRules_RecordShotDamage(int player, int damage, const float* enemyPos) {
+    if (damage <= 0 || player < 0 || player > 1) return;
+    const uint8_t* boss = FindBossSlot();
+    if (!boss || reinterpret_cast<const uint8_t*>(enemyPos) != boss + Game::kEntityPos) return;
+    g_state.bossDamage[g_state.bossDamageSlot][player] += damage;
+}
+
+void CoopRules_DpsText(char* out, int outSize, float* r, float* g, float* b) {
+    out[0] = '\0';
+    if (g_state.bossFrames <= 0 || !FindBossSlot()) return;
+    int window = g_state.bossFrames < kDpsWindow ? g_state.bossFrames : kDpsWindow;
+    if (window < 30) return;
+    long long sum[2] = { 0, 0 };
+    for (int i = 0; i < window; i++) {
+        int slot = (g_state.bossDamageSlot - i + kDpsWindow) % kDpsWindow;
+        sum[0] += g_state.bossDamage[slot][0];
+        sum[1] += g_state.bossDamage[slot][1];
+    }
+    long long dps1 = sum[0] * 60 / window, dps2 = sum[1] * 60 / window;
+    *r = 1.0f; *g = 0.55f; *b = 0.25f;
+    if (Player2_IsActive()) {
+        snprintf(out, outSize, "BOSS DPS %lld\nP1 %lld  P2 %lld", dps1 + dps2, dps1, dps2);
+    } else {
+        snprintf(out, outSize, "BOSS DPS %lld", dps1);
+    }
 }
 
 void CoopRules_SetSettings(const CoopSettings& settings) {

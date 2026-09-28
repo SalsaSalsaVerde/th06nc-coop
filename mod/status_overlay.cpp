@@ -17,45 +17,92 @@ using PresentFn = HRESULT(__stdcall*)(IDXGISwapChain*, UINT, UINT);
 PresentFn g_origPresent = nullptr;
 OverlayRenderer* g_overlay = nullptr;
 StatusTextProvider g_provider = nullptr;
+StatusTextProvider g_cornerProvider = nullptr;
 OverlayWorldDrawer g_worldDrawer = nullptr;
 int g_recursionDepth = 0;
+
+// The playfield starts about 27% of the way across the window (overlay/14:
+// x 400/1456), and the boss's HP bar runs along its top, so both text
+// blocks stay inside the left margin: small glyphs, lines wrapped to fit.
+const float kCharW = 11.0f / 1456.0f;
+const float kCharH = 11.0f / 816.0f;
+const float kLineStep = 0.017f;
+const int kMaxColumns = 26;
+const float kLeft = 0.012f;
+
+// Word-wraps `in` into `out` so no line is longer than kMaxColumns.
+void Wrap(const char* in, char* out, size_t outSize, int* lines, size_t* longest) {
+    size_t o = 0, col = 0, lastSpaceOut = static_cast<size_t>(-1);
+    *lines = 1;
+    *longest = 0;
+    for (const char* c = in; *c && o + 2 < outSize; c++) {
+        if (*c == '\n') {
+            out[o++] = '\n';
+            (*lines)++;
+            col = 0;
+            lastSpaceOut = static_cast<size_t>(-1);
+            continue;
+        }
+        if (*c == ' ') lastSpaceOut = o;
+        out[o++] = *c;
+        col++;
+        if (col > static_cast<size_t>(kMaxColumns) && lastSpaceOut != static_cast<size_t>(-1)) {
+            out[lastSpaceOut] = '\n';
+            (*lines)++;
+            col = o - lastSpaceOut - 1;
+            lastSpaceOut = static_cast<size_t>(-1);
+        }
+        if (col > *longest) *longest = col;
+    }
+    out[o] = '\0';
+    // Recount the longest line after wrapping.
+    *longest = 0;
+    size_t current = 0;
+    for (const char* c = out; *c; c++) {
+        if (*c == '\n') current = 0;
+        else if (++current > *longest) *longest = current;
+    }
+}
+
+// One text block on a dark backing at (kLeft, top); `bottom` anchors it by
+// its lower edge instead. A colored bar marks the block's state.
+void DrawBlock(const char* raw, float r, float g, float b, float anchorY, bool bottom) {
+    char text[512];
+    int lines = 0;
+    size_t longest = 0;
+    Wrap(raw, text, sizeof(text), &lines, &longest);
+    float boxW = 0.016f + kCharW * static_cast<float>(longest) + 0.006f;
+    float boxH = 0.008f + kLineStep * static_cast<float>(lines);
+    float top = bottom ? anchorY - boxH : anchorY;
+    OverlayQuad backing = { kLeft + boxW * 0.5f, top + boxH * 0.5f, boxW * 0.5f, boxH * 0.5f, 0.0f, 0.0f, 0.0f, 0.55f };
+    g_overlay->DrawQuad(backing);
+    OverlayQuad light = { kLeft + 0.006f, top + 0.004f + kLineStep * 0.5f, 0.003f, kLineStep * 0.4f, r, g, b, 0.95f };
+    g_overlay->DrawQuad(light);
+    TextRenderer_EnsureLoaded(*g_overlay);
+    float y = top + 0.005f;
+    for (char* line = text; line && *line;) {
+        char* next = strchr(line, '\n');
+        if (next) *next++ = '\0';
+        DrawText(*g_overlay, line, kLeft + 0.013f, y, kCharW, kCharH, 1.0f);
+        y += kLineStep;
+        line = next;
+    }
+}
 
 void Render(IDXGISwapChain* swapChain) {
     char text[320] = {};
     float r = 1.0f, g = 1.0f, b = 1.0f;
     if (g_provider) g_provider(text, sizeof(text), &r, &g, &b);
+    char corner[160] = {};
+    float cr = 1.0f, cg = 1.0f, cb = 1.0f;
+    if (g_cornerProvider) g_cornerProvider(corner, sizeof(corner), &cr, &cg, &cb);
 
     if (!g_overlay) g_overlay = new OverlayRenderer();
     g_overlay->EnsureInitialized(swapChain);
     g_overlay->BeginFrame();
     if (g_worldDrawer) g_worldDrawer(*g_overlay);
-    if (text[0] == '\0') {
-        g_overlay->EndFrame();
-        return;
-    }
-    // Glyph cells are 16px; at the 1456x816 window these are 1:1.
-    const float charW = 16.0f / 1456.0f, charH = 16.0f / 816.0f, lineStep = 0.024f;
-    int lines = 1;
-    size_t longest = 0, current = 0;
-    for (const char* c = text; *c; c++) {
-        if (*c == '\n') { lines++; current = 0; } else if (++current > longest) longest = current;
-    }
-    // A dark backing so white text reads on any background.
-    float boxW = 0.04f + charW * static_cast<float>(longest) + 0.01f;
-    float boxH = 0.012f + lineStep * static_cast<float>(lines);
-    OverlayQuad backing = { 0.01f + boxW * 0.5f, 0.012f + boxH * 0.5f, boxW * 0.5f, boxH * 0.5f, 0.0f, 0.0f, 0.0f, 0.55f };
-    g_overlay->DrawQuad(backing);
-    OverlayQuad light = { 0.025f, 0.03f, 0.009f, 0.016f, r, g, b, 0.95f };
-    g_overlay->DrawQuad(light);
-    TextRenderer_EnsureLoaded(*g_overlay);
-    float y = 0.02f;
-    for (char* line = text; line && *line;) {
-        char* next = strchr(line, '\n');
-        if (next) *next++ = '\0';
-        DrawText(*g_overlay, line, 0.04f, y, charW, charH, 1.0f);
-        y += lineStep;
-        line = next;
-    }
+    if (text[0] != '\0') DrawBlock(text, r, g, b, 0.012f, false);
+    if (corner[0] != '\0') DrawBlock(corner, cr, cg, cb, 0.97f, true);
     g_overlay->EndFrame();
 }
 
@@ -151,6 +198,10 @@ void WaitForGameWindow() {
 
 void StatusOverlay_SetProvider(StatusTextProvider provider) {
     g_provider = provider;
+}
+
+void StatusOverlay_SetCornerProvider(StatusTextProvider provider) {
+    g_cornerProvider = provider;
 }
 
 void StatusOverlay_SetWorldDrawer(OverlayWorldDrawer drawer) {

@@ -249,9 +249,29 @@ void Snapshot_EndCalibration() {
 
 bool g_drawLearningArmed = false;
 
+// The extra regions too (P2's struct, the rules state, the GUI object): the
+// player draw writes into the player struct, and the HUD draws the GUI's
+// VMs. The sync test always learned these; netplay now does as well
+// (docs/15).
+std::vector<uint8_t> g_extrasBaseline;
+std::vector<const void*> g_extrasBaselinePtr;
+
+const uint8_t* ExtraLive(const ExtraRegion& region) {
+    return static_cast<const uint8_t*>(region.ptr ? region.ptr : *Game::At<void*>(region.pointerRva));
+}
+
 void Snapshot_ArmDrawLearning() {
     if (!EnsureAllocated()) return;
     memcpy(g_calibrationBaseline, g_dataBase, g_dataSize);
+    g_extrasBaseline.resize(g_extrasSize);
+    g_extrasBaselinePtr.resize(g_extras.size());
+    size_t offset = 0;
+    for (size_t i = 0; i < g_extras.size(); i++) {
+        const uint8_t* live = ExtraLive(g_extras[i]);
+        g_extrasBaselinePtr[i] = live;
+        if (live) memcpy(g_extrasBaseline.data() + offset, live, g_extras[i].size);
+        offset += g_extras[i].size;
+    }
     g_drawLearningArmed = true;
 }
 
@@ -259,10 +279,26 @@ void Snapshot_LearnDrawChanges() {
     if (!g_drawLearningArmed) return;
     g_drawLearningArmed = false;
     size_t added = DiffAgainstBaseline();
+    size_t offset = 0, extraAdded = 0;
+    for (size_t i = 0; i < g_extras.size() && offset + g_extras[i].size <= g_extrasBaseline.size(); i++) {
+        ExtraRegion& region = g_extras[i];
+        const uint8_t* live = ExtraLive(region);
+        if (live && live == g_extrasBaselinePtr[i]) {
+            const uint8_t* base = g_extrasBaseline.data() + offset;
+            for (size_t b = 0; b < region.size; b++) {
+                if (live[b] != base[b] && !region.skip[b]) {
+                    region.skip[b] = 1;
+                    extraAdded++;
+                }
+            }
+        }
+        offset += region.size;
+    }
     if (added > 0) {
         ModLog("Snapshot: drawing changed %zu more bytes -- now excluded from restores", added);
         BuildRestoreRanges();
     }
+    if (extraAdded > 0) ModLog("Snapshot: drawing changed %zu bytes of the extra regions -- excluded too", extraAdded);
 }
 
 void Snapshot_Save(int frame) {
@@ -314,6 +350,61 @@ bool Snapshot_Load(int frame) {
 bool Snapshot_Has(int frame) {
     Slot* slot = SlotFor(frame);
     return slot && slot->frame == frame;
+}
+
+namespace {
+
+// Values that are addresses differ between two processes (ASLR, heap), so
+// cross-machine hashes treat anything shaped like a user-mode pointer as 0.
+bool LooksLikeAnyPointer(uint64_t v) {
+    return v >= 0x0000010000000000ull && v < 0x0000800000000000ull;
+}
+
+uint64_t MixWord(uint64_t hash, uint64_t v) {
+    hash ^= v;
+    hash *= 0x100000001B3ull;
+    hash ^= hash >> 29;
+    return hash;
+}
+
+uint64_t HashWords(const uint8_t* p, size_t size, const uint8_t* skipBits) {
+    uint64_t hash = 0xCBF29CE484222325ull;
+    for (size_t q = 0; q + 8 <= size; q += 8) {
+        uint8_t mask = skipBits ? skipBits[q >> 3] : 0;
+        if (mask == 0xFF) continue;
+        uint64_t v;
+        memcpy(&v, p + q, 8);
+        if (mask == 0 && LooksLikeAnyPointer(v)) v = 0;
+        for (int b = 0; b < 8; b++) {
+            if (mask & (1u << b)) v &= ~(0xFFull << (b * 8));
+        }
+        hash = MixWord(hash, v);
+    }
+    return hash;
+}
+
+} // namespace
+
+size_t Snapshot_HashCount() {
+    return (g_dataSize + 4095) / 4096 + g_extras.size();
+}
+
+void Snapshot_Hashes(uint64_t* out) {
+    size_t pages = (g_dataSize + 4095) / 4096;
+    for (size_t pg = 0; pg < pages; pg++) {
+        size_t begin = pg * 4096;
+        size_t size = begin + 4096 <= g_dataSize ? 4096 : g_dataSize - begin;
+        out[pg] = g_volatile.empty() ? 0 : HashWords(g_dataBase + begin, size, g_volatile.data() + (begin >> 3));
+    }
+    for (size_t e = 0; e < g_extras.size(); e++) {
+        const ExtraRegion& r = g_extras[e];
+        const uint8_t* ptr = static_cast<const uint8_t*>(r.ptr ? r.ptr : *Game::At<void*>(r.pointerRva));
+        out[pages + e] = ptr ? HashWords(ptr, r.size, nullptr) : 0;
+    }
+}
+
+uintptr_t Snapshot_DataRva() {
+    return reinterpret_cast<uintptr_t>(g_dataBase) - Game::Base();
 }
 
 void Snapshot_Clear() {

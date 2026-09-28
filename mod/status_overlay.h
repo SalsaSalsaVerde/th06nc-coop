@@ -13,6 +13,9 @@ void StatusOverlay_Install();
 using StatusTextProvider = void (*)(char* out, int outSize, float* r, float* g, float* b);
 void StatusOverlay_SetProvider(StatusTextProvider provider);
 
+// A second block in the bottom-left corner (the boss DPS meter).
+void StatusOverlay_SetCornerProvider(StatusTextProvider provider);
+
 // Draws things placed on the playfield (player_look.h's focus rings) each
 // frame, under the status text.
 class OverlayRenderer;

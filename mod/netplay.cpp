@@ -44,7 +44,7 @@ const char* StateName(State s) {
     return "?";
 }
 
-const uint8_t kProtocolVersion = 5;
+const uint8_t kProtocolVersion = 6;
 enum MsgType : uint8_t { kMsgReady = 1, kMsgInputs = 2, kMsgChecksum = 3, kMsgLoadout = 4 };
 
 #pragma pack(push, 1)
@@ -229,6 +229,7 @@ struct SyncTestStats {
     int skipped = 0;
 };
 SyncTestStats g_syncTestStats;
+bool g_syncTestPerturbBroken = false; // misprediction mode hit a task-list change
 
 using SceneInitFn = uint64_t (*)(void* scene);
 SceneInitFn g_origSceneInit = nullptr;
@@ -319,6 +320,94 @@ void LogStats(const char* when) {
            g_stats.predictedFrames, g_stats.stalls);
 }
 
+// ---- desync forensics (docs/15) ----------------------------------------------
+//
+// A checksum mismatch only says "somewhere in the last 60 frames". Each
+// machine therefore keeps, per simulated frame, the RNG state, the inputs
+// used and every checksum region, and, per checksum frame, a hash of every
+// 4 KB page of the snapshot. At the first desync both machines log all of
+// it; diffing the two logs gives the exact frame and the memory pages.
+
+struct FrameTrail {
+    int frame = -1;
+    uint16_t seed = 0;
+    uint32_t counter = 0;
+    uint16_t p1 = 0, p2 = 0;
+    bool resimulated = false;
+    bool predicted = false;
+    uint64_t region[kChecksumRegionCount] = {};
+};
+FrameTrail g_trail[kRing];
+
+struct PageHashes {
+    int frame = -1;
+    std::vector<uint64_t> hashes;
+};
+PageHashes g_pageHashes[8];
+
+struct RollbackRecord {
+    int target;
+    int end;
+};
+RollbackRecord g_recentRollbacks[32];
+int g_recentRollbackCount = 0;
+
+void RecordTrail(int f, uint16_t p1, uint16_t p2, bool resimulated, bool predicted) {
+    FrameTrail& t = g_trail[f % kRing];
+    t.frame = f;
+    t.seed = *Game::At<uint16_t>(Game::kRngSeed);
+    t.counter = *Game::At<uint32_t>(Game::kRngCounter);
+    t.p1 = p1;
+    t.p2 = p2;
+    t.resimulated = resimulated;
+    t.predicted = predicted;
+    GameChecksum sum = Checksum_Compute(Player2_IsActive() ? Player2_Struct() : nullptr);
+    memcpy(t.region, sum.region, sizeof(t.region));
+}
+
+void StorePageHashes(int frame) {
+    PageHashes& p = g_pageHashes[(frame / kChecksumInterval) % 8];
+    p.frame = frame;
+    p.hashes.resize(Snapshot_HashCount());
+    Snapshot_Hashes(p.hashes.data());
+}
+
+void DumpDesyncForensics(int frame) {
+    ModLog("Forensics: frame trail around the desync (after each step: seed/counter, inputs P1 P2, R = re-simulated,"
+           " P = on predicted input, then the %d checksum regions, 8 hex digits each)", kChecksumRegionCount);
+    for (int f = frame - 90; f <= frame; f++) {
+        if (f < 0) continue;
+        const FrameTrail& t = g_trail[f % kRing];
+        if (t.frame != f) continue;
+        char regions[kChecksumRegionCount * 9 + 1] = {};
+        for (int r = 0; r < kChecksumRegionCount; r++) {
+            snprintf(regions + r * 9, 10, " %08X", static_cast<uint32_t>(t.region[r]));
+        }
+        ModLog("Trail %d: %04X/%u %03X %03X %s%s%s", f, t.seed, t.counter, t.p1, t.p2, t.resimulated ? "R" : "-",
+               t.predicted ? "P" : "-", regions);
+    }
+    for (int i = 0; i < g_recentRollbackCount && i < 32; i++) {
+        const RollbackRecord& r = g_recentRollbacks[(g_recentRollbackCount - 1 - i) % 32];
+        if (r.end < frame - 300) break;
+        ModLog("Forensics: rollback from %d back to %d", r.end, r.target);
+    }
+    const PageHashes& p = g_pageHashes[(frame / kChecksumInterval) % 8];
+    if (p.frame != frame) {
+        ModLog("Forensics: no page hashes kept for frame %d", frame);
+        return;
+    }
+    ModLog("Forensics: page hashes at frame %d (.data at rva %llX, 4 KB each, then %zu extra regions)", frame,
+           static_cast<unsigned long long>(Snapshot_DataRva()), p.hashes.size() - (p.hashes.size() > 3 ? 3 : 0));
+    char line[16 * 17 + 32];
+    for (size_t i = 0; i < p.hashes.size(); i += 16) {
+        int len = snprintf(line, sizeof(line), "Pages %04zu:", i);
+        for (size_t j = i; j < i + 16 && j < p.hashes.size(); j++) {
+            len += snprintf(line + len, sizeof(line) - len, " %016llX", static_cast<unsigned long long>(p.hashes[j]));
+        }
+        ModLog("%s", line);
+    }
+}
+
 // ---- checksums ------------------------------------------------------------
 
 ChecksumEntry* SumSlot(ChecksumEntry* table, int frame) {
@@ -344,6 +433,7 @@ void CompareSums(int frame) {
     }
     if (!match && g_firstDesyncFrame < 0) {
         g_firstDesyncFrame = frame;
+        DumpDesyncForensics(frame);
     } else if (match && (frame == 0 || frame % (kChecksumInterval * 10) == 0)) {
         ModLog("Netplay: checksums match at frame %d", frame);
     }
@@ -356,6 +446,7 @@ void StoreLocalSum(int frame) {
     if (entry->frame == frame && entry->sent) return;
     entry->frame = frame;
     entry->sum = Checksum_Compute(Player2_IsActive() ? Player2_Struct() : nullptr);
+    StorePageHashes(frame);
     entry->sent = false;
     entry->compared = false;
 }
@@ -478,6 +569,7 @@ uint64_t StepFrame(int f, uint32_t* outCode, bool resimulating) {
     SimControl_SetStepFrame(f);
     uint64_t result = SimControl_StepForced(outCode, p1, p2, resimulating);
     SimControl_SetStepFrame(-1);
+    RecordTrail(f, static_cast<uint16_t>(p1), static_cast<uint16_t>(p2), resimulating, !haveRemote);
 
     if (!resimulating && Chain_Signature() != signatureBefore) {
         char change[160] = "";
@@ -508,6 +600,7 @@ void DoRollback() {
     }
     Snapshot_Load(target);
     int end = g_frame;
+    g_recentRollbacks[g_recentRollbackCount++ % 32] = { target, end };
     for (int f = target; f < end; f++) {
         uint32_t code = 0;
         // Only the low byte is the game's flag (its step returns a bool):
@@ -563,6 +656,9 @@ void ResetRun() {
     g_firstDesyncFrame = -1;
     g_stats = Stats();
     Snapshot_Clear();
+    for (FrameTrail& t : g_trail) t.frame = -1;
+    for (PageHashes& p : g_pageHashes) p.frame = -1;
+    g_recentRollbackCount = 0;
 }
 
 // ---- barrier --------------------------------------------------------------
@@ -954,7 +1050,8 @@ void SyncTestCalibrateTick() {
     Snapshot_Clear();
     g_frame = 0;
     g_syncTestStats = SyncTestStats();
-    SetState(State::SyncTest, "calibrated");
+    g_syncTestPerturbBroken = false;
+    SetState(State::SyncTest, Cfg().syncTestPerturb ? "calibrated (misprediction mode)" : "calibrated");
 }
 
 // Rolls back `distance` frames, re-simulates them with the recorded inputs
@@ -972,6 +1069,29 @@ void RunSyncCheck() {
     }
     Snapshot_Save(g_frame);
     GameChecksum reference = Checksum_Compute(Player2_IsActive() ? Player2_Struct() : nullptr);
+
+    // Misprediction mode (docs/15): a real rollback first ran these frames on
+    // a wrong guess of the partner's input. Anything a snapshot doesn't
+    // rewind keeps what that wrong run did to it, which identical-input
+    // re-simulation can never reveal. So first run the frames with both
+    // players' inputs altered (left/right swapped, shoot and focus toggled;
+    // never bomb or pause, which could create heap tasks), then rewind and
+    // do the real check.
+    if (Cfg().syncTestPerturb && !g_syncTestPerturbBroken) {
+        Snapshot_Load(from);
+        for (int f = from; f < g_frame; f++) {
+            uint32_t code = 0;
+            const RecordedInputs& in = g_syncTestInputs[f % kRing];
+            const uint32_t flip = Game::kButtonLeft | Game::kButtonRight | Game::kButtonShoot | Game::kButtonFocus;
+            SimControl_SetStepFrame(f);
+            SimControl_StepForced(&code, in.p1 ^ flip, in.p2 ^ flip, true);
+            SimControl_SetStepFrame(-1);
+        }
+        if (g_listSignature[from % kRing] != Chain_Signature()) {
+            ModLog("SyncTest: the altered-input run changed the task list -- misprediction mode off for this stage");
+            g_syncTestPerturbBroken = true;
+        }
+    }
 
     Snapshot_Load(from);
     for (int f = from; f < g_frame; f++) {
@@ -1043,10 +1163,18 @@ uint64_t Driver(uint32_t* outCode) {
         case State::Barrier:
             BarrierTick();
             return 0;
-        case State::Running:
+        case State::Running: {
             TakeOverlayPauseRequest();
+            // Like the sync test, keep learning what drawing alone writes
+            // (between one rendered frame's last step and the next one), so
+            // rollbacks restore exactly the set the sync test validated
+            // (docs/15). Lockstep never restores, so it needn't.
+            if (g_sessionNet.rollback) Snapshot_LearnDrawChanges();
+            int before = g_frame;
             result = RunningTick(outCode);
+            if (g_sessionNet.rollback && g_frame != before) Snapshot_ArmDrawLearning();
             break;
+        }
         case State::Degraded:
             result = DegradedTick(outCode);
             break;
@@ -1192,16 +1320,16 @@ void Netplay_StatusText(char* out, int outSize, float* r, float* g, float* b) {
             }
             break;
         case State::Idle:
-            sprintf_s(out, outSize, "CO-OP: CONNECTED - YOU ARE %s", role);
+            sprintf_s(out, outSize, "CO-OP CONNECTED - YOU ARE %s", role);
             set(0.1f, 0.85f, 0.2f);
             break;
         case State::Barrier:
-            sprintf_s(out, outSize, "CO-OP: WAITING FOR PARTNER TO REACH THE STAGE...");
+            sprintf_s(out, outSize, "WAITING FOR PARTNER...");
             set(0.9f, 0.9f, 0.1f);
             break;
         case State::Running:
             if (g_firstDesyncFrame >= 0) {
-                sprintf_s(out, outSize, "CO-OP: DESYNC AT FRAME %d - SEE LOG", g_firstDesyncFrame);
+                sprintf_s(out, outSize, "DESYNC AT FRAME %d - SEND BOTH LOGS", g_firstDesyncFrame);
                 set(0.95f, 0.2f, 0.2f);
             } else {
                 sprintf_s(out, outSize, "CO-OP %s  %s  DELAY %d", role,
@@ -1210,7 +1338,7 @@ void Netplay_StatusText(char* out, int outSize, float* r, float* g, float* b) {
             }
             break;
         case State::Degraded:
-            sprintf_s(out, outSize, "CO-OP: PLAYING LOCALLY - %s", g_stateReason);
+            sprintf_s(out, outSize, "PLAYING LOCALLY: %s", g_stateReason);
             set(0.95f, 0.2f, 0.2f);
             break;
         case State::SyncTestCalibrate:
@@ -1223,19 +1351,25 @@ void Netplay_StatusText(char* out, int outSize, float* r, float* g, float* b) {
             if (g_syncTestStats.failures > 0) set(0.95f, 0.2f, 0.2f); else set(0.1f, 0.85f, 0.2f);
             break;
     }
-    // Separate resources: the game's HUD only shows P1's pool (docs/06).
+    // Separate resources: the HUD shows this player's own pool (the guest's
+    // is swapped in for the HUD draw, player_look.cpp), so the partner's goes
+    // here -- P2's on the host and in same-machine play, P1's on the guest.
     if (Player2_IsActive() && !CoopRules_Settings().sharedResources) {
         if (out[0] == '\0') set(0.8f, 0.8f, 0.9f);
+        bool partnerIsP1 = Netplay_LocalPlayerIndex() == 1;
         const PlayerResources* p2 = Player2_Resources();
+        int lives = partnerIsP1 ? *Game::At<uint8_t>(Game::kLives) : p2->lives;
+        int bombs = partnerIsP1 ? *Game::At<uint8_t>(Game::kBombs) : p2->bombs;
+        unsigned power = partnerIsP1 ? *Game::At<uint32_t>(Game::kPower) : p2->power;
         size_t len = strlen(out);
         // The HUD shows the lives byte plus one (the life in play).
-        sprintf_s(out + len, outSize - len, "%sP2  LIVES %d  BOMBS %d  POWER %u/128", len ? "\n" : "",
-                  p2->lives + 1, p2->bombs, p2->power);
+        sprintf_s(out + len, outSize - len, "%s%s LIVES %d BOMBS %d POWER %u", len ? "\n" : "",
+                  partnerIsP1 ? "P1" : "P2", lives + 1, bombs, power);
     }
     int reviveFrames = CoopRules_ReviveFramesLeft();
     if (reviveFrames >= 0) {
         size_t len = strlen(out);
-        sprintf_s(out + len, outSize - len, "%sPARTNER DOWN - REVIVE IN %d", len ? "\n" : "", (reviveFrames + 59) / 60);
+        sprintf_s(out + len, outSize - len, "%sPARTNER DOWN, BACK IN %d", len ? "\n" : "", (reviveFrames + 59) / 60);
     }
     for (char* c = out; *c; c++) {
         if (*c >= 'a' && *c <= 'z') *c = static_cast<char>(*c - 'a' + 'A');

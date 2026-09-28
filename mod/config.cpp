@@ -110,6 +110,11 @@ void Config_Load() {
     c.coop.startBombs[1] = static_cast<int8_t>(ReadInt(path, "coop", "p2_start_bombs", -1));
     c.coop.startPower = static_cast<int16_t>(ReadInt(path, "coop", "start_power", -1));
     c.coop.startStage = static_cast<int8_t>(ReadInt(path, "coop", "start_stage", 1));
+    char revivePower[32] = {};
+    GetPrivateProfileStringA("coop", "revive_power", "last", revivePower, sizeof(revivePower), path);
+    if (_stricmp(revivePower, "last") == 0) c.coop.revivePower = -1;
+    else if (_stricmp(revivePower, "max") == 0) c.coop.revivePower = 128;
+    else c.coop.revivePower = static_cast<int16_t>(atoi(revivePower) < 0 ? 0 : (atoi(revivePower) > 128 ? 128 : atoi(revivePower)));
     char startPoint[32] = {};
     GetPrivateProfileStringA("coop", "start_point", "stage", startPoint, sizeof(startPoint), path);
     if (_stricmp(startPoint, "midboss") == 0) c.coop.startPoint = kStartAtMidboss;
@@ -125,6 +130,7 @@ void Config_Load() {
     c.look.p2Color = ReadColor(path, "p2_color", c.look.p2Color);
     c.look.proximityFade = ReadInt(path, "visual", "proximity_fade", 1) != 0;
     c.look.focusRing = ReadInt(path, "visual", "focus_ring", 1) != 0;
+    c.bossDps = ReadInt(path, "visual", "boss_dps", 1) != 0;
 
     char mode[32] = {};
     GetPrivateProfileStringA("netplay", "mode", "rollback", mode, sizeof(mode), path);
@@ -138,6 +144,7 @@ void Config_Load() {
     c.syncTest = ReadInt(path, "synctest", "enabled", 0) != 0;
     c.syncTestDistance = ReadInt(path, "synctest", "distance", c.syncTestDistance);
     c.syncTestInterval = ReadInt(path, "synctest", "interval", c.syncTestInterval);
+    c.syncTestPerturb = ReadInt(path, "synctest", "perturb", 0) != 0;
     if (c.syncTestDistance < 1) c.syncTestDistance = 1;
     if (c.syncTestDistance > c.netplayMaxRollback) c.syncTestDistance = c.netplayMaxRollback;
     if (c.syncTestInterval < 1) c.syncTestInterval = 1;

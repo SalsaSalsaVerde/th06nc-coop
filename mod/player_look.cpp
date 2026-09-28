@@ -218,7 +218,43 @@ void UpdateAndDrawP2Ring(uint8_t* player) {
 // P1's focus marker is the HUD's: its draw task draws the two GUI VMs the
 // HUD tick keeps on P1. When P1 is the other player (the guest's view),
 // they fade with P1 for the duration of that draw.
+//
+// With separate resources the HUD would show P1's pool on both machines; the
+// guest sees its own instead. The HUD draw (and FUN_140041f50, which it
+// calls) reads lives, bombs and power straight from the globals, so P2's
+// pool is swapped in for the draw alone -- outside any simulation step.
+class HudResourceScope {
+public:
+    HudResourceScope() {
+        m_active = Netplay_LocalPlayerIndex() == 1 && Player2_IsActive() && !CoopRules_Settings().sharedResources;
+        if (m_active) Exchange();
+    }
+    ~HudResourceScope() {
+        if (m_active) Exchange();
+    }
+    HudResourceScope(const HudResourceScope&) = delete;
+    HudResourceScope& operator=(const HudResourceScope&) = delete;
+
+private:
+    static void Exchange() {
+        PlayerResources* p2 = Player2_Resources();
+        uint8_t* lives = Game::At<uint8_t>(Game::kLives);
+        uint8_t* bombs = Game::At<uint8_t>(Game::kBombs);
+        uint32_t* power = Game::At<uint32_t>(Game::kPower);
+        uint8_t l = *lives, b = *bombs;
+        uint32_t w = *power;
+        *lives = p2->lives;
+        *bombs = p2->bombs;
+        *power = p2->power;
+        p2->lives = l;
+        p2->bombs = b;
+        p2->power = w;
+    }
+    bool m_active = false;
+};
+
 uint64_t Detour_HudDraw(void* hud) {
+    HudResourceScope resources;
     uint8_t* gui = *Game::At<uint8_t*>(Game::kGuiObjectPtr);
     float alpha = Player2_IsActive() && gui ? FadeFor(0) : 1.0f;
     if (alpha >= 1.0f) return g_origHudDraw(hud);

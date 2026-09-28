@@ -18,6 +18,10 @@ struct CoopSettings {
     int16_t startPower = -1; // power (0-128) both players start a run with; -1 = the game's (0)
     int8_t startStage = 1;   // checkpoint: a new co-op run starts at this stage (1-6)
     int8_t startPoint = 0;   // CoopStartPoint: where in that stage the run starts
+    // Separate resources: the power a downed player comes back with when
+    // revived by the timer -- -1 = what they had before going down, else
+    // 0-128 (the game's tiers: 0 8 16 32 48 64 80 96 128) (docs/15).
+    int16_t revivePower = -1;
 };
 
 enum CoopStartPoint : int8_t {
@@ -62,6 +66,13 @@ int CoopRules_ReviveFramesLeft();
 
 // A new run started (not the next stage of the same run): nobody is downed.
 void CoopRules_ResetRun();
+
+// Boss DPS meter (docs/15): the shot-damage hook reports each player's
+// damage to each enemy; damage to the tracked boss is tallied per frame in
+// the rules state (so rollbacks rewind it). The text is for the overlay's
+// bottom-left block; empty while no boss is up.
+void CoopRules_RecordShotDamage(int player, int damage, const float* enemyPos);
+void CoopRules_DpsText(char* out, int outSize, float* r, float* g, float* b);
 
 // Call at the entry of the gameplay scene init, before the stage loads.
 // For a fresh co-op run from the menu (not a replay or practice), starts it

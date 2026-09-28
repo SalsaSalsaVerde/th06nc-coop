@@ -52,3 +52,11 @@ void Snapshot_Clear();
 // With `learnExtraDiffs`, differing bytes of the extra regions are marked
 // volatile instead of counted (they hold no checksummed gameplay state).
 size_t Snapshot_CompareLive(int frame, int maxReport, bool learnExtraDiffs = false);
+
+// Desync forensics (docs/15): one hash per 4 KB page of the live .data
+// (restorable bytes only; pointer-shaped words count as 0, since addresses
+// differ between processes), then one per extra region. Comparing two
+// machines' lists names the pages that differ.
+size_t Snapshot_HashCount();
+void Snapshot_Hashes(uint64_t* out);
+uintptr_t Snapshot_DataRva();

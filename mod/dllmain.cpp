@@ -44,6 +44,7 @@ void Initialize() {
         return;
     }
     StatusOverlay_SetProvider(&Netplay_StatusText);
+    if (Config_Get().bossDps) StatusOverlay_SetCornerProvider(&CoopRules_DpsText);
     StatusOverlay_SetWorldDrawer(&DrawOverlays);
     StatusOverlay_Install();
 }

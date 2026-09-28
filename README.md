@@ -43,6 +43,8 @@ test checklist and `docs/00` for what's done.
   logs showed, the continue desync, the late-pick race, and the fixes
 - `docs/14-second-online-test.md` — rollback's first run: bomb shakes vs.
   rollback, synchronized pause, item ownership, netcode in F8
+- `docs/15-third-online-test.md` — animations draw gameplay RNG, desync
+  forensics, items, per-player HUD, DPS meter, power after revive
 
 ## Install
 

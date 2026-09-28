@@ -78,8 +78,14 @@ bomb, **I** focus (or a second controller).
       with per-player resources both are at full power.
 - [ ] Pause online: Esc on either machine pauses both; either player can
       move the cursor and resume; opening the Steam overlay pauses both.
-- [ ] Items: while one player sits above the collection line, the other
-      can still pick up items by touching them.
+- [ ] Items: while one player sits above the collection line, or blinks
+      after respawning, the other can still pick up items by touching them.
+- [ ] Per-player resources online: each HUD shows your own lives/bombs/
+      power; the corner text shows the partner's.
+- [ ] Boss DPS meter bottom-left during a boss; the status block no longer
+      covers the boss HP bar.
+- [ ] Revive with POWER AFTER REVIVE = before going down: the player comes
+      back with the power they had.
 - [ ] Checkpoint set only on the host starts both games there, also on
       the second run without restarting the game.
 - [ ] F8 NETCODE / INPUT DELAY on the host switch both games at the next
