@@ -1,14 +1,11 @@
-# th06nc native co-op
+# th06nc co-op mod
 
 A two-player co-op mod for **Touhou Koumakyou ~ the Embodiment of Scarlet
-Devil: New Classic** (Steam, `th06nc.exe`). The second player is a real
-player simulated by the game itself: native sprite, shots, bombs that clear
-bullets, deaths, graze, item collection, enemies aiming at whichever player
-is closer. Play on one PC, or online with a friend through a Steam lobby.
+Devil: New Classic** (Steam, `th06nc.exe`). Play on one PC(local co-op), or online with a friend through a Steam lobby.
 
 Unofficial fan project, not affiliated with the game's developers or
 publisher. You need your own copy of the game; the mod contains none of its
-files (even the overlay font is read from your installed game at runtime).
+files.
 
 ## Status
 
