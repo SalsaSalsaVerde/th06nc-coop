@@ -57,6 +57,10 @@ checkpoint. Both netplay machines do this with the host's setting, so the
 READY stage check still matches. `start_power` pairs with it (starting
 stage 5 at 0 power is rough).
 
+Solo runs (not connected, local 2-player off) use the checkpoint stage and
+start point too, as a practice tool; the starting stock and power don't
+apply there, since they're set when Player 2 spawns.
+
 The flags that tell the run modes apart (new RE, docs in `game.h`):
 
 | Global | Set by | Meaning |

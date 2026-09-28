@@ -387,7 +387,9 @@ void CoopRules_OnSceneInit(bool coopActive) {
            " checkpoint stage %d point %d, co-op %d",
            *stage, replay, practice, spell, continues, score, g_settings.startStage, g_settings.startPoint,
            coopActive ? 1 : 0);
-    if (!coopActive || (g_settings.startStage <= 1 && g_settings.startPoint == kStartAtStage)) return;
+    // Solo runs use the checkpoint too, as a practice tool: the jump is the
+    // same whether or not a second player is in the scene.
+    if (g_settings.startStage <= 1 && g_settings.startPoint == kStartAtStage) return;
 
     // Stage index 0 at a scene init is always a new run from the menu: a
     // continue doesn't re-init the scene, and later stages have higher

@@ -75,8 +75,9 @@ void CoopRules_RecordShotDamage(int player, int damage, const float* enemyPos);
 void CoopRules_DpsText(char* out, int outSize, float* r, float* g, float* b);
 
 // Call at the entry of the gameplay scene init, before the stage loads.
-// For a fresh co-op run from the menu (not a replay or practice), starts it
-// at the checkpoint stage instead of stage 1 (docs/08).
+// For a fresh run from the menu (not a replay or practice), co-op or solo,
+// starts it at the checkpoint stage instead of stage 1 (docs/08).
+// `coopActive` is only logged.
 void CoopRules_OnSceneInit(bool coopActive);
 
 // Call right after the gameplay scene init returned: applies the start
