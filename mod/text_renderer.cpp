@@ -39,6 +39,23 @@ const uint8_t* ReadGameFile(const char* path, uint32_t* size) {
     return Game::Fn<ReadFileFn>(Game::kFnReadArchiveFile)(path, 0, size);
 }
 
+// th06IN.dat, which holds the font, is open only during startup: it sits in
+// archive slot 0, which the title screen's archive then takes over. So the
+// mod opens it again in a slot the game never uses, reads, and closes it --
+// the game's own open (FUN_14007cfd0) and close (FUN_14007cf20) (docs/16).
+const int kSpareArchiveSlot = 15;
+
+bool OpenFontArchive() {
+    using OpenFn = int (*)(void* fileSystem, int slot, const char* path);
+    return Game::Fn<OpenFn>(Game::kFnArchiveOpen)(Game::At<void>(Game::kArchiveSystem), kSpareArchiveSlot,
+                                                 "data\\th06IN.dat") == 0;
+}
+
+void CloseFontArchive() {
+    using CloseFn = void (*)(void* fileSystem, int slot);
+    Game::Fn<CloseFn>(Game::kFnArchiveClose)(Game::At<void>(Game::kArchiveSystem), kSpareArchiveSlot);
+}
+
 uint32_t U32(const uint8_t* p) {
     uint32_t v;
     memcpy(&v, p, 4);
@@ -140,8 +157,17 @@ void TextRenderer_EnsureLoaded(OverlayRenderer& overlay) {
     const uint8_t* dds = ReadGameFile("data/ascii/ascii.dds", &ddsSize);
     const uint8_t* anm = ReadGameFile("data/ascii/ascii.anm", &anmSize);
     if (!dds || !anm) {
-        ModLog("TextRenderer: the game's font isn't readable yet (attempt %d)", g_attempts);
-        return;
+        bool opened = OpenFontArchive();
+        if (opened) {
+            if (!dds) dds = ReadGameFile("data/ascii/ascii.dds", &ddsSize);
+            if (!anm) anm = ReadGameFile("data/ascii/ascii.anm", &anmSize);
+            CloseFontArchive();
+        }
+        if (!dds || !anm) {
+            ModLog("TextRenderer: the game's font isn't readable (attempt %d, th06IN.dat %s)", g_attempts,
+                   opened ? "opened" : "didn't open");
+            return;
+        }
     }
     uint32_t width = 0, height = 0;
     if (!CreateFromDds(overlay, dds, ddsSize, &width, &height)) {

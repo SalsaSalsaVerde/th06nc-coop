@@ -58,10 +58,17 @@ const size_t kAnmSpriteEntrySize = 0x40;
 const uintptr_t kAnmScriptBases = 0x20F90;     // int32 per ID
 const uintptr_t kAnmScripts = 0x23090;         // script pointer per ID
 const int kAnmMaxIds = 0x800;
-const uintptr_t kFnAnmLoad = 0x2440;
+const uintptr_t kFnAnmLoad = 0x2440;           // (unused, slot, path, baseId) -> 0 ok
 // (path, fromDisk = 0, uint32 *outSize) -> malloc'd copy of the archive file
 // with that file name (decrypted, decompressed), or 0 -- the anm loader's read.
-const uintptr_t kFnReadArchiveFile = 0x3A0C0;           // (unused, slot, path, baseId) -> 0 ok
+// It searches the 16 archive slots of the file system object below.
+const uintptr_t kFnReadArchiveFile = 0x3A0C0;
+// The file system object: archive slots at +0x10 (16 pointers), their paths
+// at +0x90 (0x20 each). The game uses slots 0 (th06IN.dat at startup, then
+// the title's), 1, 2, 4, 6 (docs/16).
+const uintptr_t kArchiveSystem = 0xC6DB90;
+const uintptr_t kFnArchiveOpen = 0x7CFD0;      // (system, slot, path) -> 0 ok (also 0 if already open)
+const uintptr_t kFnArchiveClose = 0x7CF20;     // (system, slot)
 const uintptr_t kFnAnmUnload = 0x2BE0;         // (manager, slot)
 const uintptr_t kFnAnmSetScript = 0x2B40;      // (unused, vm, scriptId)
 const uintptr_t kFnAnmTick = 0x7020;           // (anmManager, vm) -> runs the VM's script one frame

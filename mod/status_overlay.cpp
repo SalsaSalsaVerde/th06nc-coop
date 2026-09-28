@@ -100,6 +100,7 @@ void Render(IDXGISwapChain* swapChain) {
     if (!g_overlay) g_overlay = new OverlayRenderer();
     g_overlay->EnsureInitialized(swapChain);
     g_overlay->BeginFrame();
+    TextRenderer_EnsureLoaded(*g_overlay); // up front, so the first message isn't blank
     if (g_worldDrawer) g_worldDrawer(*g_overlay);
     if (text[0] != '\0') DrawBlock(text, r, g, b, 0.012f, false);
     if (corner[0] != '\0') DrawBlock(corner, cr, cg, cb, 0.97f, true);

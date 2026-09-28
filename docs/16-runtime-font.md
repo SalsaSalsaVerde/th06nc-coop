@@ -11,9 +11,17 @@ player's own installed game.
   directory, looks the file name up in the open `.dat` archives (up to 16,
   at `0xC6DBA0`; a language-prefixed name first, then the plain one), and
   returns a malloc'd, decrypted, decompressed copy, or 0. The mod calls it
-  for `data/ascii/ascii.dds` and `data/ascii/ascii.anm` the first time the
-  overlay draws text (retrying for a few seconds if the archives aren't
-  open yet). The buffers are kept (read once per run).
+  for `data/ascii/ascii.dds` and `data/ascii/ascii.anm` on the overlay's
+  first frame. The buffers are kept (read once per run).
+- **th06IN.dat isn't open by then.** The startup code (`FUN_140046da0`)
+  opens it into archive slot 0, and the title screen's archive takes that
+  slot over, so the first version found nothing ("lobby text blank"). The
+  archive table lives in the object at `0xC6DB90` (16 slot pointers at
+  `+0x10`, their paths at `+0x90`); `FUN_14007cfd0(system, slot, path)`
+  opens an archive into a slot and `FUN_14007cf20(system, slot)` closes
+  one. The game uses slots 0, 1, 2, 4 and 6, so the mod opens th06IN.dat
+  in slot 15, reads the two files, and closes the slot again. Confirmed:
+  `TextRenderer: game font loaded (512x512, 95 of 95 glyphs)`.
 - **The texture** is 512×512 **BC7** behind a DX10 DDS header. Direct3D 11
   samples BC7 natively, so the payload is uploaded as is
   (`OverlayRenderer::CreateTextureFromData`, row pitch 16 bytes per 4×4
