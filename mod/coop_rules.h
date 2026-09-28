@@ -8,7 +8,7 @@ struct CoopSettings {
     float bossHpMultiplier = 2.0f; // boss HP x this while two players are in the stage
     bool invincible = false;       // practice: bullets and enemies can't kill anyone
     uint8_t targeting = 0;         // CoopTargeting
-    bool sharedResources = true;   // one pool of lives/bombs/power; false = each player has their own
+    bool sharedResources = false;  // one pool of lives/bombs/power; false = each player has their own
     int32_t reviveSeconds = 30;    // separate resources only: surviving this long revives a downed partner (0 = never)
     // Starting stock at the start of a run, per player (P1, P2), as the HUD
     // counts them; -1 = the game's own option. With shared resources only

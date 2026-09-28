@@ -102,7 +102,7 @@ void Config_Load() {
 
     c.coop.bossHpMultiplier = ReadFloat(path, "coop", "boss_hp_multiplier", c.coop.bossHpMultiplier);
     c.coop.invincible = ReadInt(path, "coop", "invincible", 0) != 0;
-    c.coop.sharedResources = ReadInt(path, "coop", "shared_resources", 1) != 0;
+    c.coop.sharedResources = ReadInt(path, "coop", "shared_resources", c.coop.sharedResources ? 1 : 0) != 0;
     c.coop.reviveSeconds = ReadInt(path, "coop", "revive_seconds", c.coop.reviveSeconds);
     c.coop.startLives[0] = static_cast<int8_t>(ReadInt(path, "coop", "p1_start_lives", -1));
     c.coop.startLives[1] = static_cast<int8_t>(ReadInt(path, "coop", "p2_start_lives", -1));

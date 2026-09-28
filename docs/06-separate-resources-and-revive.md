@@ -1,14 +1,15 @@
 # 06 — Separate lives/bombs/power, downed and revive
 
-Status: **built, not live-tested.** Off by default (`[coop] shared_resources=1`).
+Status: **built, played online** (docs/13-15). The default since
+2026-09-28 (`[coop] shared_resources=0`); shared was the default before.
 
 ## Modes
 
-- `shared_resources=1` (default): one pool, exactly the game's own
+- `shared_resources=1`: one pool, exactly the game's own
   globals. Either player dying spends a shared life; either bombing spends a
   shared bomb; items feed the shared power. Last life lost by anyone = game
   over. Nothing below applies.
-- `shared_resources=0`: each player has their own lives, bombs and power.
+- `shared_resources=0` (default): each player has their own lives, bombs and power.
   P1's live in the game's globals (so the game's HUD shows P1's). P2's live
   in `Player2State::resources` and are shown in the status text, top left:
   `P2  LIVES n  BOMBS n  POWER n/128`.
