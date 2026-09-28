@@ -6,7 +6,7 @@
 // Settings read once at startup from th06nc_native_coop.ini next to the game
 // exe. Every key is optional; missing keys keep the defaults below.
 struct Config {
-    bool player2Enabled = true;
+    bool player2Enabled = false; // local same-machine P2; off unless turned on (ini or F8)
     float player2SpawnOffsetX = 48.0f; // P2 spawns this far right of P1
     int player2Character = -1;         // 0 Reimu, 1 Marisa, -1 same as P1 (local play only)
     int player2ShotType = -1;          // 0 A, 1 B, -1 same as P1

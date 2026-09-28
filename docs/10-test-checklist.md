@@ -4,8 +4,9 @@ Nothing below has run in the game yet. Work top to bottom: each block
 depends on the ones above it. After any failure, the useful thing to send
 back is `th06nc_native_coop.log` (game folder) plus what you saw.
 
-The installed ini has `[player2] enabled=1`, so a second player appears in
-every stage from the start. P2's keys: **T/F/G/H** move, **O** shoot, **P**
+Local two-player is off by default (since 2026-09-28): turn it on with F8 →
+LOCAL 2-PLAYER, or `[player2] enabled=1`. An existing ini keeps its own
+setting. Online the partner is always P2 regardless. P2's keys: **T/F/G/H** move, **O** shoot, **P**
 bomb, **I** focus (or a second controller).
 
 ## 1. Boots at all

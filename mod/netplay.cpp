@@ -1276,8 +1276,10 @@ uint64_t Detour_SceneInit(void* scene) {
 
 // ---- Player 2 lifecycle ---------------------------------------------------
 
+// Online the partner is always P2; the sync test needs a P2 to cover too,
+// whatever the local-2-player setting says.
 bool ForceSpawnPlayer2() {
-    return g_connected;
+    return g_connected || Cfg().syncTest;
 }
 
 void OnPlayer2Spawned() {

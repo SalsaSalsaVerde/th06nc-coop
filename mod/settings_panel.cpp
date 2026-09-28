@@ -251,7 +251,7 @@ void Describe(int item, char* label, size_t labelSize, char* value, size_t value
             FormatColor(value, valueSize, look.p2Color);
             break;
         case kItemLocalP2:
-            snprintf(label, labelSize, "P2 ON THIS PC");
+            snprintf(label, labelSize, "LOCAL 2-PLAYER (THIS PC)");
             snprintf(value, valueSize, "%s", Player2_Enabled() ? "ON" : "OFF");
             break;
         case kItemP2Character:

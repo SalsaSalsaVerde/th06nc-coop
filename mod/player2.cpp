@@ -65,7 +65,7 @@ Player2Listener g_listener;
 // ---- P2 as a different character (docs/04) ---------------------------------
 
 int g_wantedCharacter = -1;
-bool g_enabled = true; // same-machine P2 ([player2] enabled, settings panel)
+bool g_enabled = false; // same-machine P2 ([player2] enabled, settings panel)
 bool g_inStage = false;
 int g_wantedShot = -1;
 

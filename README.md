@@ -67,7 +67,8 @@ straight in; `-Restore` puts the previous proxy back).
 
 ## Playing
 
-- **Same machine**: Player 2 uses a second controller (XInput index 1) or
+- **Same machine** (off by default: F8 → LOCAL 2-PLAYER, or `[player2]
+  enabled=1`): Player 2 uses a second controller (XInput index 1) or
   T/F/G/H to move + O (shoot) / P (bomb) / I (focus). The game's own second
   layout uses W/A/S/D and J/K/L, so P2's keys stay clear of those. P2's
   character is set in the
