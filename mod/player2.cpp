@@ -422,10 +422,10 @@ void Despawn() {
     if (g_listener.onDespawned) g_listener.onDespawned();
 }
 
-// A new run: the game just set lives/bombs from its own options. Apply the
-// per-player starting stock from the co-op settings (docs/06); P2's pool
-// starts as a copy of P1's.
-void ApplyStartingStock() {
+// A new run: the game just set lives/bombs from its own options. Apply P1's
+// starting stock and power from the co-op settings (docs/06). Solo runs use
+// it too.
+void ApplyP1StartingStock() {
     const CoopSettings& s = CoopRules_Settings();
     uint8_t* lives = Game::At<uint8_t>(Game::kLives);
     uint8_t* bombs = Game::At<uint8_t>(Game::kBombs);
@@ -436,7 +436,14 @@ void ApplyStartingStock() {
     *Game::At<uint8_t>(Game::kStageStartBombs) = *bombs;
     uint32_t* hud = Game::At<uint32_t>(Game::kHudDirtyFlags);
     *hud = (*hud & ~0x15u) | 0x2Au; // lives, bombs, power changed (the bits the player update sets)
+}
 
+// The same for a co-op run; P2's pool starts as a copy of P1's.
+void ApplyStartingStock() {
+    const CoopSettings& s = CoopRules_Settings();
+    ApplyP1StartingStock();
+    uint8_t* lives = Game::At<uint8_t>(Game::kLives);
+    uint8_t* bombs = Game::At<uint8_t>(Game::kBombs);
     g_state.resources = { *lives, *bombs, *Game::At<uint32_t>(Game::kPower), *bombs };
     if (!s.sharedResources) {
         if (s.startLives[1] > 0) g_state.resources.lives = static_cast<uint8_t>(s.startLives[1] - 1);
@@ -538,6 +545,12 @@ uint64_t Detour_RegisterPlayer() {
     }
     if (result == 0 && wanted) {
         Spawn();
+    } else if (result == 0 && !*Game::At<uint8_t>(Game::kReplayFlag) && *Game::At<uint32_t>(Game::kScore) == 0) {
+        // A solo run's start (score 0, as in Spawn): the starting stock
+        // applies here too, a practice aid with the checkpoint.
+        ApplyP1StartingStock();
+        ModLog("Player2: solo run -- starting stock applied (lives %d bombs %d power %u)",
+               *Game::At<uint8_t>(Game::kLives), *Game::At<uint8_t>(Game::kBombs), *Game::At<uint32_t>(Game::kPower));
     }
     return result;
 }

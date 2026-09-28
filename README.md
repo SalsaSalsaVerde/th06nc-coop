@@ -46,8 +46,9 @@ Both players online need the same mod version.
   shared or per-player lives/bombs/power, revive timer and power after a
   revive, starting stock, a checkpoint stage (and midboss/boss start),
   invincible practice, enemy targeting, colors. Online the host's settings
-  apply to both. Closing the panel saves to the ini. The checkpoint also
-  applies to single-player runs, handy for practice.
+  apply to both. Closing the panel saves to the ini; RESET TO DEFAULTS
+  (press twice) puts everything back. The checkpoint and starting
+  lives/bombs/power also apply to single-player runs, handy for practice.
 
 On screen: a small status block top-left (connection, netcode, your
 partner's lives/bombs/power when resources are per player), and a boss DPS

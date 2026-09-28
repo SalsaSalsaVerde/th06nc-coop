@@ -58,8 +58,13 @@ READY stage check still matches. `start_power` pairs with it (starting
 stage 5 at 0 power is rough).
 
 Solo runs (not connected, local 2-player off) use the checkpoint stage and
-start point too, as a practice tool; the starting stock and power don't
-apply there, since they're set when Player 2 spawns.
+start point too, as a practice tool, and P1's starting lives, bombs and
+power: applied where P2 would have spawned (the player registration, score
+0, not a replay).
+
+The panel's last item, RESET TO DEFAULTS, takes two presses and puts back
+the built-in defaults of everything this machine may set (a guest: only its
+color); closing the panel saves them.
 
 The flags that tell the run modes apart (new RE, docs in `game.h`):
 

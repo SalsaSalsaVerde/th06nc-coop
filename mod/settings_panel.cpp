@@ -53,8 +53,11 @@ enum Item {
     kItemP2Color,
     kItemLocalP2,
     kItemP2Character,
+    kItemReset,
     kItemCount
 };
+
+bool g_resetArmed = false; // the reset item was pressed once; the next press resets
 
 // A short label for a virtual-key code, for the panel's key line.
 const char* KeyName(int vk) {
@@ -83,6 +86,7 @@ bool Online() {
 bool Editable(int item) {
     switch (item) {
         case kItemColor:
+        case kItemReset:
             return true;
         case kItemP2Color:
         case kItemLocalP2:
@@ -258,14 +262,43 @@ void Describe(int item, char* label, size_t labelSize, char* value, size_t value
             snprintf(label, labelSize, "P2 CHARACTER (SAME PC)");
             snprintf(value, valueSize, "%s", kCharacterNames[CharacterIndex()]);
             break;
+        case kItemReset:
+            snprintf(label, labelSize, "RESET TO DEFAULTS");
+            snprintf(value, valueSize, "%s", g_resetArmed ? "PRESS AGAIN TO CONFIRM" : "PRESS SHOOT");
+            break;
         default:
             label[0] = value[0] = '\0';
             break;
     }
 }
 
+// Everything this machine may set back to the built-in defaults (the ones
+// with no ini): a guest keeps the host's rules and resets only its color.
+void ResetToDefaults() {
+    if (!IsGuest()) {
+        CoopRules_SetOwnSettings(CoopSettings{});
+        Config defaults;
+        Netplay_SetOwnNetcode(defaults.netplayRollback, defaults.netplayInputDelay);
+    }
+    LookSettings look = PlayerLook_Settings();
+    LookSettings lookDefaults;
+    look.color = lookDefaults.color;
+    if (!Online()) {
+        look.p2Color = lookDefaults.p2Color;
+        Player2_SetEnabled(Config{}.player2Enabled);
+        Player2_SetLoadout(-1, -1);
+    }
+    PlayerLook_SetSettings(look);
+    ModLog("SettingsPanel: settings reset to defaults");
+}
+
 void Change(int item, int dir) {
     if (!Editable(item)) return;
+    if (item == kItemReset) {
+        if (g_resetArmed) ResetToDefaults();
+        g_resetArmed = !g_resetArmed;
+        return;
+    }
     CoopSettings s = CoopRules_OwnSettings();
     LookSettings look = PlayerLook_Settings();
     bool rules = true;
@@ -373,6 +406,7 @@ bool GameWindowFocused() {
 
 void Close() {
     g_open = false;
+    g_resetArmed = false;
     g_waitRelease = true;
     Save();
 }
@@ -405,8 +439,10 @@ uint32_t SettingsPanel_FilterInput(uint32_t input) {
         Close();
         return 0;
     }
+    int before = g_selected;
     if (pressed & Game::kButtonUp) g_selected = (g_selected + kItemCount - 1) % kItemCount;
     if (pressed & Game::kButtonDown) g_selected = (g_selected + 1) % kItemCount;
+    if (g_selected != before) g_resetArmed = false;
     if (pressed & Game::kButtonLeft) Change(g_selected, -1);
     if (pressed & (Game::kButtonRight | Game::kButtonShoot)) Change(g_selected, 1);
     return 0;
@@ -443,7 +479,8 @@ void SettingsPanel_Draw(OverlayRenderer& overlay) {
         float alpha = Editable(item) ? 1.0f : 0.55f;
         snprintf(line, sizeof(line), "%s%s", item == g_selected ? "> " : "  ", label);
         DrawText(overlay, line, left, y, charW, charH, alpha);
-        snprintf(line, sizeof(line), "%s%s%s", Editable(item) ? "< " : "  ", value, Editable(item) ? " >" : "");
+        bool arrows = Editable(item) && item != kItemReset;
+        snprintf(line, sizeof(line), "%s%s%s", arrows ? "< " : "  ", value, arrows ? " >" : "");
         DrawText(overlay, line, valueX, y, charW, charH, alpha);
     }
     DrawText(overlay, "UP/DOWN SELECT   LEFT/RIGHT CHANGE   BOMB, ESC OR F8 CLOSES AND SAVES", left,
