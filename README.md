@@ -1,60 +1,72 @@
 # th06nc native co-op
 
-A co-op mod for **Touhou Koumakyou: New Classic** (`th06nc.exe`) where the
-second player is a real player simulated by the game itself — native sprite,
-shots, bombs that clear bullets, deaths, graze, item collection, enemies
-aiming at whichever player is closer — playable on one machine, or online
-through a Steam lobby with rollback netcode.
+A two-player co-op mod for **Touhou Koumakyou ~ the Embodiment of Scarlet
+Devil: New Classic** (Steam, `th06nc.exe`). The second player is a real
+player simulated by the game itself: native sprite, shots, bombs that clear
+bullets, deaths, graze, item collection, enemies aiming at whichever player
+is closer. Play on one PC, or online with a friend through a Steam lobby.
 
-Successor to the overlay-based mod in `..\Touhou Coop Mod` (whose `docs/`
-are the research record this builds on; referenced here as `overlay/NN`).
+Unofficial fan project, not affiliated with the game's developers or
+publisher. You need your own copy of the game; the mod contains none of its
+files (even the overlay font is read from your installed game at runtime).
 
-**Status (2026-09-27): local play live-tested and working; the rollback
-self-test passes; the first two-machine test held lockstep sync for two
-full stages (docs/13), and rollback mode is next.** See `docs/10` for the
-test checklist and `docs/00` for what's done.
+## Status
 
-## Docs
+- **Online, lockstep netcode:** played through stages 1–6 in sync.
+- **Online, rollback netcode:** works, but still has an occasional desync
+  under investigation (docs/15). If you see `DESYNC AT FRAME n` in the
+  corner, both players' logs help.
+- **Same PC:** works (off by default, see below).
 
-- `docs/00-scope-and-gap-analysis.md` — what changes vs. the overlay mod,
-  the findings that make it feasible, gap list, risks
-- `docs/01-native-player2.md` — how the second player exists
-- `docs/02-netplay-rollback.md` — lockstep/rollback netplay, snapshots, the
-  sync test, test plan
-- `docs/03-player2-shared-systems.md` — P2 in enemy aim, items, lasers,
-  graze
-- `docs/04-different-characters.md` — P2 as another character; each player
-  picks their own online
-- `docs/05-coop-rules.md` — boss HP multiplier, invincible practice,
-  targeting mode
-- `docs/06-separate-resources-and-revive.md` — optional per-player
-  lives/bombs/power, downed players and the revive timer
-- `docs/07-player-visuals.md` — player colors, the other player fading
-  near you, focus ring
-- `docs/08-settings-panel-checkpoints-replays.md` — the in-game co-op
-  settings panel (F8), stage checkpoints, replay safety
-- `docs/09-installer.md` — the single-file installer
-- `docs/10-test-checklist.md` — what to check in the game, in order
-- `docs/11-first-live-test-fixes.md` — what the first live tests found and
-  how it was fixed
-- `docs/12-stage-timeline-and-start-points.md` — the stage timeline;
-  midboss / boss start points
-- `docs/13-first-online-test.md` — the first two-machine test: what the
-  logs showed, the continue desync, the late-pick race, and the fixes
-- `docs/14-second-online-test.md` — rollback's first run: bomb shakes vs.
-  rollback, synchronized pause, item ownership, netcode in F8
-- `docs/15-third-online-test.md` — animations draw gameplay RNG, desync
-  forensics, items, per-player HUD, DPS meter, power after revive
+The mod checks the game's build at startup; if a game update changes the
+executable, it logs that and stays out of the way until it's updated.
 
 ## Install
 
-Put `th06nc_native_coop_installer.exe` in the `th06nc` game folder and run
-it. It installs, updates, replaces the older overlay mod (keeping it as
-`steam_api64.previous_proxy.dll`), or removes the mod, and writes default
-settings (`th06nc_native_coop.ini`) if there are none (docs/09). Log:
-`th06nc_native_coop.log` in the game folder.
+1. Download `th06nc_native_coop_installer.exe` from the
+   [Releases](../../releases) page.
+2. Put it in the game folder (Steam → the game → Manage → Browse local
+   files) and run it. It installs, updates or removes the mod, and writes
+   default settings (`th06nc_native_coop.ini`) if you have none.
+3. Start the game from Steam as usual. The log is
+   `th06nc_native_coop.log` in the same folder.
 
-## Build
+Both players online need the same mod version.
+
+## Playing
+
+- **Online:** the host presses **F9** in the game (creates a Steam lobby and
+  opens the invite dialog); the friend accepts the invite. Each picks their
+  own character; the host's difficulty and rules are used. Both start the
+  stage and the game waits until both have. The host is Player 1, the guest
+  Player 2; each uses their normal controls. **F10** leaves the lobby.
+  Either player can pause (Esc, or opening the Steam overlay) and it pauses
+  both games.
+- **Same PC** (off by default: **F8** → LOCAL 2-PLAYER): Player 2 uses a
+  second controller, or T/F/G/H to move + O shoot / P bomb / I focus.
+- **Settings:** **F8** in the game's menus opens the co-op settings panel:
+  netcode (rollback or lockstep) and input delay, boss HP multiplier,
+  shared or per-player lives/bombs/power, revive timer and power after a
+  revive, starting stock, a checkpoint stage (and midboss/boss start),
+  invincible practice, enemy targeting, colors. Online the host's settings
+  apply to both. Closing the panel saves to the ini.
+
+On screen: a small status block top-left (connection, netcode, your
+partner's lives/bombs/power when resources are per player), and a boss DPS
+meter bottom-left during bosses.
+
+## Known limitations
+
+- Saved replays of co-op stages don't play back correctly (old solo replays
+  are fine).
+- Bullets that re-aim mid-flight still only aim at Player 1.
+- Checkpoints are per stage, plus midboss/boss start points; individual
+  spell cards aren't selectable.
+
+## Building from source
+
+Requires Visual Studio 2022 Build Tools (C++ workload) and the Steamworks
+SDK headers (path set in `mod/build.ps1`).
 
 ```
 powershell -File mod\build.ps1
@@ -63,32 +75,39 @@ powershell -File mod\installer\build.ps1
 
 The installer embeds whatever `mod\build\steam_api64.dll` is, so build the
 mod first. `mod\deploy.ps1` is the developer shortcut (copies the built DLL
-straight in; `-Restore` puts the previous proxy back).
+straight into the game folder; `-Restore` puts the previous proxy back).
 
-## Playing
+The mod is a proxy `steam_api64.dll` (it forwards every Steam API call to
+the real DLL, renamed `steam_api64_orig.dll`) that hooks the game with
+MinHook.
 
-- **Same machine** (off by default: F8 → LOCAL 2-PLAYER, or `[player2]
-  enabled=1`): Player 2 uses a second controller (XInput index 1) or
-  T/F/G/H to move + O (shoot) / P (bomb) / I (focus). The game's own second
-  layout uses W/A/S/D and J/K/L, so P2's keys stay clear of those. P2's
-  character is set in the
-  ini (`[player2] character=`).
-- **Online**: host presses **F9** (creates a Steam lobby and opens the
-  invite dialog), friend accepts. Each picks their own character; the
-  host's difficulty is used. Both start the stage and the game waits until
-  both have (a guest who starts first sees the screen hold until the host
-  starts). The host is Player 1, the guest Player 2; each uses their
-  normal controls. **F10** leaves the lobby. Either player can pause (Esc,
-  or opening the Steam overlay) and it pauses both games.
-- **Netcode**: rollback or lockstep and the input delay are in F8; online
-  the host's choice applies to both.
-- **Settings**: **F8** in the game's menus opens the co-op settings panel
-  (rules, starting stock, checkpoint stage, colors); online the host's
-  rules apply to both. Closing it saves to the ini.
+## Docs
 
-## Layout
+The `docs/` folder is the engineering record — how each system works, and
+what every test found:
 
-- `mod/` — the proxy DLL (`steam_api64.dll`), MinHook, build/deploy scripts
-- `tools/ghidra_scripts/` — headless Ghidra helpers (copied from the overlay
-  repo, plus `FindRefsInRange.java`)
-- `research/` — decompiler output (not committed)
+- `00` scope and gap analysis · `01` the native second player · `02`
+  lockstep/rollback netplay, snapshots, the sync test · `03` P2 in enemy
+  aim, items, lasers, graze · `04` P2 as another character · `05` boss HP,
+  invincible practice, targeting · `06` per-player resources, downed and
+  revive · `07` player visuals · `08` settings panel, checkpoints, replays
+  · `09` installer · `10` test checklist · `11` first live tests · `12`
+  stage timeline and start points · `13`–`15` the online tests and fixes ·
+  `16` the runtime font
+
+References to `overlay/NN` point at the research notes of the earlier
+overlay-based version of this mod (not included here).
+
+## Credits
+
+- [MinHook](https://github.com/TsudaKageyu/minhook) by Tsuda Kageyu
+  (BSD-2-Clause), for function hooking.
+- [th06_multi_net](https://github.com/RUEEE/th06_multi_net), an EoSD co-op
+  mod whose readable source informed the near-player fade and several
+  research questions.
+- Built with help from Claude (Anthropic).
+
+## License
+
+MIT (see `LICENSE`), for this project's own code and docs. MinHook keeps
+its own license.
