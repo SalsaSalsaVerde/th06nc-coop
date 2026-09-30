@@ -18,6 +18,7 @@ struct ExtraRegion {
     uintptr_t pointerRva;
     size_t size;
     std::vector<uint8_t> skip; // 1 = volatile byte: neither restored nor compared
+    std::vector<uint8_t> pin;  // 1 = restored even when volatile (still not compared)
 };
 
 struct Slot {
@@ -30,6 +31,10 @@ struct Slot {
 uint8_t* g_dataBase = nullptr;
 size_t g_dataSize = 0;
 std::vector<uint8_t> g_volatile;           // 1 bit per .data byte
+// Pinned bytes are simulation state that drawing also writes (the players'
+// sprite VMs): excluded from comparison like any volatile byte, but always
+// restored, because the game reads them back in gameplay (docs/17).
+std::vector<uint8_t> g_pinned;             // 1 bit per .data byte
 std::vector<Range> g_restoreRanges;
 std::vector<ExtraRegion> g_extras;
 size_t g_extrasSize = 0;
@@ -95,16 +100,24 @@ void MarkVolatileRva(uintptr_t beginRva, uintptr_t endRva) {
     MarkVolatile(begin, endRva - dataRva);
 }
 
+bool IsPinned(size_t i) {
+    return (g_pinned[i >> 3] >> (i & 7)) & 1;
+}
+
+bool Restorable(size_t i) {
+    return !IsVolatile(i) || IsPinned(i);
+}
+
 void MarkFixedDenylist() {
     MarkVolatileRva(Game::kUpdateListHead, Game::kUpdateListHead + 0x40);
     MarkVolatileRva(Game::kDrawListHead, Game::kDrawListHead + 0x40);
     for (const Game::RvaRange& range : Game::kNeverRestore) {
         MarkVolatileRva(range.begin, range.end);
     }
-    // Player 1's sprite VMs (main sprite, the two orbs, each shot's): pure
-    // animation state whose scripts draw on the animation manager's own
-    // random source (a heap object outside the snapshot), so re-simulated
-    // frames differ there cosmetically (docs/11). P2's are learned.
+    // Player 1's sprite VMs (main sprite, the two orbs, each shot's) are
+    // ticked by the draw passes, so re-simulated frames (no draws) differ
+    // there: excluded from comparison (docs/11). They ARE restored: the
+    // whole player struct is pinned (docs/17). P2's are learned.
     uintptr_t p1 = Game::kPlayerStruct;
     MarkVolatileRva(p1 + Game::kPlayerMainVm, p1 + Game::kPlayerMainVm + Game::kVmSize);
     MarkVolatileRva(p1 + Game::kPlayerOptionVmL, p1 + Game::kPlayerOptionVmL + Game::kVmSize);
@@ -117,19 +130,23 @@ void MarkFixedDenylist() {
 
 void BuildRestoreRanges() {
     g_restoreRanges.clear();
-    size_t volatileBytes = 0;
+    size_t volatileBytes = 0, pinnedVolatile = 0;
     size_t i = 0;
     while (i < g_dataSize) {
-        if (IsVolatile(i)) {
+        if (!Restorable(i)) {
             volatileBytes++;
             i++;
             continue;
         }
         size_t start = i;
-        while (i < g_dataSize && !IsVolatile(i)) i++;
+        while (i < g_dataSize && Restorable(i)) {
+            if (IsVolatile(i)) pinnedVolatile++;
+            i++;
+        }
         g_restoreRanges.push_back({ static_cast<uint32_t>(start), static_cast<uint32_t>(i - start) });
     }
-    ModLog("Snapshot: %zu volatile bytes excluded, %zu restore ranges", volatileBytes, g_restoreRanges.size());
+    ModLog("Snapshot: %zu volatile bytes excluded (%zu more restored as pinned), %zu restore ranges", volatileBytes,
+           pinnedVolatile, g_restoreRanges.size());
 }
 
 bool FindDataSection() {
@@ -159,6 +176,7 @@ bool Snapshot_Init(int slotCount) {
         return false;
     }
     g_volatile.assign(g_dataSize / 8 + 1, 0);
+    g_pinned.assign(g_dataSize / 8 + 1, 0);
     MarkFixedDenylist();
     BuildRestoreRanges();
     g_slotCount = slotCount;
@@ -167,12 +185,12 @@ bool Snapshot_Init(int slotCount) {
 }
 
 void Snapshot_AddRegion(void* ptr, size_t size) {
-    g_extras.push_back({ ptr, 0, size, std::vector<uint8_t>(size, 0) });
+    g_extras.push_back({ ptr, 0, size, std::vector<uint8_t>(size, 0), std::vector<uint8_t>(size, 0) });
     g_extrasSize += size;
 }
 
 void Snapshot_AddIndirectRegion(uintptr_t pointerRva, size_t size) {
-    g_extras.push_back({ nullptr, pointerRva, size, std::vector<uint8_t>(size, 0) });
+    g_extras.push_back({ nullptr, pointerRva, size, std::vector<uint8_t>(size, 0), std::vector<uint8_t>(size, 0) });
     g_extrasSize += size;
 }
 
@@ -180,6 +198,21 @@ void Snapshot_MarkExtraVolatile(size_t regionIndex, size_t begin, size_t end) {
     if (regionIndex >= g_extras.size()) return;
     ExtraRegion& region = g_extras[regionIndex];
     for (size_t i = begin; i < end && i < region.size; i++) region.skip[i] = 1;
+}
+
+void Snapshot_PinRva(uintptr_t beginRva, uintptr_t endRva) {
+    uintptr_t dataRva = reinterpret_cast<uintptr_t>(g_dataBase) - Game::Base();
+    if (g_pinned.empty() || endRva <= dataRva || beginRva >= dataRva + g_dataSize) return;
+    size_t begin = beginRva > dataRva ? beginRva - dataRva : 0;
+    size_t end = endRva - dataRva < g_dataSize ? endRva - dataRva : g_dataSize;
+    for (size_t i = begin; i < end; i++) g_pinned[i >> 3] |= static_cast<uint8_t>(1u << (i & 7));
+    BuildRestoreRanges();
+}
+
+void Snapshot_PinExtra(size_t regionIndex, size_t begin, size_t end) {
+    if (regionIndex >= g_extras.size()) return;
+    ExtraRegion& region = g_extras[regionIndex];
+    for (size_t i = begin; i < end && i < region.size; i++) region.pin[i] = 1;
 }
 
 void Snapshot_BeginCalibration() {
@@ -336,7 +369,7 @@ bool Snapshot_Load(int frame) {
             uint8_t* out = static_cast<uint8_t*>(dst);
             const uint8_t* saved = slot->extras.data() + offset;
             for (size_t b = 0; b < region.size; b++) {
-                if (!region.skip[b]) out[b] = saved[b];
+                if (!region.skip[b] || region.pin[b]) out[b] = saved[b];
             }
         } else if (dst != slot->indirectPointers[i]) {
             ModLog("Snapshot: region %zu moved between save and load (%p -> %p), not restored",
@@ -424,7 +457,7 @@ size_t Snapshot_CompareLive(int frame, int maxReport, bool learnExtraDiffs) {
         const uint8_t* saved = slot->data + range.offset;
         if (memcmp(live, saved, range.length) == 0) continue;
         for (uint32_t i = 0; i < range.length; i++) {
-            if (live[i] == saved[i]) continue;
+            if (live[i] == saved[i] || IsVolatile(range.offset + i)) continue; // pinned bytes: restored, not compared
             if (learnExtraDiffs) {
                 // A slot that re-simulated to a different heap address is a
                 // per-frame allocation: stop restoring it (docs/11).

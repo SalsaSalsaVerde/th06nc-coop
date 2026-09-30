@@ -27,6 +27,14 @@ const uintptr_t kPlayerShotTimer = 0x40C;     // int32: -1 idle; set to 0 by a s
 const uintptr_t kPlayerShotSlots = 0x410;     // 80 shot slots of 0x170 bytes; +0x10 nonzero = in use
 const uintptr_t kPlayerShotSlotStride = 0x170;
 const int kPlayerShotSlotCount = 80;      // u8
+// Shot slot fields the shot-damage function FUN_14006b420 reads (docs/17):
+// a slot hits while state == 1 (flying) or its type is 2 (piercing); a hit
+// sets state 2, and switches the slot's VM (+0x18) to the hit animation by
+// adding 0x20 to the script id at VM+0x38 -- so the VM is gameplay state.
+const uintptr_t kShotSlotState = 0x10;         // u16: 0 free, 1 flying, 2 hit, 3 = (type-3 shots)
+const uintptr_t kShotSlotType = 0x12;          // u16
+const uintptr_t kShotSlotPos = 0x13C;          // float x, y (z at +0x144)
+const uintptr_t kShotSlotSize = 0x160;         // float half-width, half-height
 const uintptr_t kPlayerNodePtrs = 0x78A8;     // 4 task-node pointers (P1's are read by teardown)
 
 // Scheduler (overlay/08): priority-sorted doubly-linked lists of 64-byte
@@ -193,6 +201,11 @@ const uintptr_t kRngCounter = 0xABAE60;        // u32
 const uintptr_t kReplayFlag = 0x53D3DC;        // u8: a replay is playing back
 const uintptr_t kPracticeFlag = 0x53D404;      // u8: stage practice
 const uintptr_t kSpellPracticeFlag = 0x53D405; // u8: spell practice
+// The options-menu game mode (option byte 0xC6DFDB, replay header byte 6):
+// set by FUN_14004f320 before the scene init reads it; deaths don't cost
+// lives and power never drops below 8. Online the guest adopts the host's
+// (docs/17).
+const uintptr_t kTrainingMode = 0x53D414;      // u8
 // Stage timeline (docs/12): the ECL's timeline is a list of records of
 // shorts {time, arg, opcode, size, ...}; time < 0 ends it. The enemy
 // manager (0xAEE0B0, entities at +8) ticks it in FUN_140037b80 against the

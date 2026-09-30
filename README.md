@@ -10,9 +10,9 @@ files.
 ## Status
 
 - **Online, lockstep netcode:** played through stages 1–6 in sync.
-- **Online, rollback netcode:** works, but still has an occasional desync
-  under investigation (docs/15). If you see `DESYNC AT FRAME n` in the
-  corner, both players' logs help.
+- **Online, rollback netcode:** works, but has had an occasional desync;
+  the cause was pinned down and fixed in docs/17, awaiting a live test.
+  If you see `DESYNC AT FRAME n` in the corner, both players' logs help.
 - **Same PC:** works (off by default, see below).
 
 The mod checks the game's build at startup; if a game update changes the
@@ -34,8 +34,8 @@ Both players online need the same mod version.
 
 - **Online:** the host presses **F9** in the game (creates a Steam lobby and
   opens the invite dialog); the friend accepts the invite. Each picks their
-  own character; the host's difficulty and rules are used. Both start the
-  stage and the game waits until both have. The host is Player 1, the guest
+  own character; the host's difficulty, game mode and rules are used. Both
+  start the stage and the game waits until both have. The host is Player 1, the guest
   Player 2; each uses their normal controls. **F10** leaves the lobby.
   Either player can pause (Esc, or opening the Steam overlay) and it pauses
   both games.
@@ -92,7 +92,8 @@ what every test found:
   revive · `07` player visuals · `08` settings panel, checkpoints, replays
   · `09` installer · `10` test checklist · `11` first live tests · `12`
   stage timeline and start points · `13`–`15` the online tests and fixes ·
-  `16` the runtime font
+  `16` the runtime font · `17` the rollback desync found, run mode
+  follows the host
 
 References to `overlay/NN` point at the research notes of the earlier
 overlay-based version of this mod (not included here).

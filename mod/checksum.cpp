@@ -44,6 +44,24 @@ GameChecksum Checksum_Compute(const uint8_t* player2) {
     sum.region[kChecksumPlayer1] = HashPlayer(Game::Player1());
     sum.region[kChecksumPlayer2] = player2 ? HashPlayer(player2) : 0;
 
+    // Shots: the fields the shot-damage function (FUN_14006b420) tests --
+    // state, type, logical position -- for every slot in use (docs/17).
+    uint64_t shots = kFnvOffset;
+    const uint8_t* owners[2] = { Game::Player1(), player2 };
+    for (int p = 0; p < 2; p++) {
+        if (!owners[p]) continue;
+        const uint8_t* slot = owners[p] + Game::kPlayerShotSlots;
+        for (int i = 0; i < Game::kPlayerShotSlotCount; i++, slot += Game::kPlayerShotSlotStride) {
+            uint16_t state = *reinterpret_cast<const uint16_t*>(slot + Game::kShotSlotState);
+            if (state == 0) continue;
+            MixValue(shots, p * 256 + i);
+            MixValue(shots, state);
+            Mix(shots, slot + Game::kShotSlotType, 2);
+            Mix(shots, slot + Game::kShotSlotPos, 8);
+        }
+    }
+    sum.region[kChecksumShots] = shots;
+
     uint64_t bullets = kFnvOffset;
     const uint8_t* bullet = Game::At<uint8_t>(Game::kBulletArray);
     for (int i = 0; i < Game::kBulletSlots; i++, bullet += Game::kBulletStride) {
@@ -96,7 +114,7 @@ GameChecksum Checksum_Compute(const uint8_t* player2) {
 
 const char* Checksum_RegionName(int region) {
     static const char* names[kChecksumRegionCount] = {
-        "rng", "player1", "player2", "bullets", "entities", "items", "resources"
+        "rng", "player1", "player2", "shots", "bullets", "entities", "items", "resources"
     };
     return (region >= 0 && region < kChecksumRegionCount) ? names[region] : "?";
 }

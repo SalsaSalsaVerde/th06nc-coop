@@ -44,7 +44,7 @@ const char* StateName(State s) {
     return "?";
 }
 
-const uint8_t kProtocolVersion = 6;
+const uint8_t kProtocolVersion = 7; // v7: run mode in Loadout/Ready, shots checksum region (docs/17)
 enum MsgType : uint8_t { kMsgReady = 1, kMsgInputs = 2, kMsgChecksum = 3, kMsgLoadout = 4 };
 
 #pragma pack(push, 1)
@@ -70,6 +70,12 @@ struct LoadoutMsg {
     // The sender's netcode choice; the guest uses the host's (docs/14).
     uint8_t netRollback;
     uint8_t netInputDelay;
+    // The run mode the sender's stage is starting in, meaningful when
+    // committed: the guest builds its stage in the host's (docs/17).
+    int32_t stage;
+    uint8_t practice;
+    uint8_t spellPractice;
+    uint8_t training;
 };
 struct ReadyMsg {
     MsgHeader header;
@@ -101,6 +107,10 @@ struct ReadyMsg {
     // The host's netcode for this session; the guest adopts it (docs/14).
     uint8_t netRollback;
     uint8_t netInputDelay;
+    // Run mode flags, compared like the stage (docs/17).
+    uint8_t practice;
+    uint8_t spellPractice;
+    uint8_t training;
 };
 const int kMaxInputsPerPacket = 32;
 struct InputsMsg {
@@ -251,6 +261,19 @@ Selection g_lastSentSelection = {};
 bool g_lastSentSelectionValid = false;
 // The session the peer's committed loadout (its stage start) was for; 0 = none.
 uint16_t g_peerCommitSession = 0;
+// The run mode that committed loadout was in (docs/17).
+struct RunMode {
+    int32_t stage;
+    uint8_t practice;
+    uint8_t spellPractice;
+    uint8_t training;
+};
+RunMode g_peerCommitMode = {};
+
+RunMode ReadRunMode() {
+    return RunMode{ *Game::At<int32_t>(Game::kStageNumber), *Game::At<uint8_t>(Game::kPracticeFlag),
+                    *Game::At<uint8_t>(Game::kSpellPracticeFlag), *Game::At<uint8_t>(Game::kTrainingMode) };
+}
 // How long a guest that reaches the stage first waits for the host's
 // committed loadout before starting on the tentative one (docs/13).
 const uint32_t kCommitWaitMs = 20000;
@@ -584,6 +607,29 @@ uint64_t StepFrame(int f, uint32_t* outCode, bool resimulating) {
     return result;
 }
 
+// A restore to frame T must reproduce the state frame T-1 ended with, which
+// the trail recorded right after that step. A region that differs names a
+// snapshot gap directly, without a peer (docs/17).
+int g_restoreChecksLeft = 20;
+
+void CheckRestore(int target) {
+    if (g_restoreChecksLeft <= 0 || target <= 0) return;
+    const FrameTrail& before = g_trail[(target - 1) % kRing];
+    if (before.frame != target - 1) return;
+    GameChecksum now = Checksum_Compute(Player2_IsActive() ? Player2_Struct() : nullptr);
+    char regions[256] = {};
+    for (int r = 0; r < kChecksumRegionCount; r++) {
+        if (now.region[r] != before.region[r]) {
+            strcat_s(regions, Checksum_RegionName(r));
+            strcat_s(regions, " ");
+        }
+    }
+    if (!regions[0]) return;
+    g_restoreChecksLeft--;
+    ModLog("Netplay: RESTORE to %d differs from the state frame %d ended with: %s(%d more reports)", target,
+           target - 1, regions, g_restoreChecksLeft);
+}
+
 void DoRollback() {
     int target = g_rollbackTarget;
     g_rollbackTarget = -1;
@@ -601,6 +647,7 @@ void DoRollback() {
     Snapshot_Load(target);
     int end = g_frame;
     g_recentRollbacks[g_recentRollbackCount++ % 32] = { target, end };
+    CheckRestore(target);
     for (int f = target; f < end; f++) {
         uint32_t code = 0;
         // Only the low byte is the game's flag (its step returns a bool):
@@ -654,6 +701,7 @@ void ResetRun() {
     for (ChecksumEntry& e : g_localSums) e = ChecksumEntry();
     for (ChecksumEntry& e : g_remoteSums) e = ChecksumEntry();
     g_firstDesyncFrame = -1;
+    g_restoreChecksLeft = 20;
     g_stats = Stats();
     Snapshot_Clear();
     for (FrameTrail& t : g_trail) t.frame = -1;
@@ -697,6 +745,10 @@ ReadyMsg MakeReady() {
     msg.stageStartBombs = *Game::At<uint8_t>(Game::kStageStartBombs);
     msg.netRollback = g_ownNet.rollback ? 1 : 0;
     msg.netInputDelay = static_cast<uint8_t>(g_ownNet.inputDelay);
+    RunMode mode = ReadRunMode();
+    msg.practice = mode.practice;
+    msg.spellPractice = mode.spellPractice;
+    msg.training = mode.training;
     return msg;
 }
 
@@ -740,20 +792,24 @@ void StartRunning() {
     // pick, which the host repairs on its side (above) -- the host's READY
     // may simply predate that repair.
     bool p2Match = !IsHost() || (peer.p2Character == local.p2Character && peer.p2ShotType == local.p2ShotType);
+    bool modeMatch = peer.practice == local.practice && peer.spellPractice == local.spellPractice &&
+                     peer.training == local.training;
     bool match = peer.buildStamp == local.buildStamp && p1Match && p2Match &&
-                 peer.difficulty == local.difficulty && peer.stage == local.stage &&
+                 peer.difficulty == local.difficulty && peer.stage == local.stage && modeMatch &&
                  CoopSettings_Equal(peer.coop, local.coop);
     if (!match) {
-        ModLog("Netplay: MISMATCH -- local P1=%d%c P2=%d%c diff=%d stage=%d build=%08X, peer P1=%d%c P2=%d%c diff=%d stage=%d build=%08X."
+        ModLog("Netplay: MISMATCH -- local P1=%d%c P2=%d%c diff=%d stage=%d mode=%d/%d/%d build=%08X,"
+               " peer P1=%d%c P2=%d%c diff=%d stage=%d mode=%d/%d/%d build=%08X."
                " Both players must start the same game mode and stage. Playing this stage locally.",
                local.character, 'A' + local.shotType, local.p2Character, 'A' + local.p2ShotType,
-               local.difficulty, local.stage, local.buildStamp,
+               local.difficulty, local.stage, local.practice, local.spellPractice, local.training, local.buildStamp,
                peer.character, 'A' + peer.shotType, peer.p2Character, 'A' + peer.p2ShotType,
-               peer.difficulty, peer.stage, peer.buildStamp);
+               peer.difficulty, peer.stage, peer.practice, peer.spellPractice, peer.training, peer.buildStamp);
         Snapshot_EndCalibration();
         const char* reason = "the two games started differently";
         if (peer.buildStamp != local.buildStamp) reason = "different game builds";
         else if (peer.stage != local.stage) reason = "different stages -- start the same one";
+        else if (!modeMatch) reason = "different game modes (practice / training option) -- start the same one";
         else if (!p1Match || peer.difficulty != local.difficulty) {
             reason = IsHost() ? "the guest started before your final pick -- both quit to the title and start again"
                               : "the host changed their pick after you started -- both quit to the title and start again";
@@ -879,7 +935,12 @@ void OnMessage(const uint8_t* data, size_t size) {
                 }
                 g_peerSelection = s;
                 g_peerSelectionValid = true;
-                if (msg.committed) g_peerCommitSession = header.session;
+                if (msg.committed) {
+                    g_peerCommitSession = header.session;
+                    g_peerCommitMode = RunMode{ msg.stage, msg.practice, msg.spellPractice, msg.training };
+                    ModLog("Netplay: partner's stage %d, practice %d, spell practice %d, training option %d",
+                           msg.stage + 1, msg.practice, msg.spellPractice, msg.training);
+                }
                 if (!IsHost()) {
                     g_hostNet.rollback = msg.netRollback != 0;
                     g_hostNet.inputDelay = msg.netInputDelay <= 10 ? msg.netInputDelay : 2;
@@ -918,7 +979,32 @@ LoadoutMsg MakeLoadout(uint16_t session, bool committed) {
     msg.committed = committed ? 1 : 0;
     msg.netRollback = g_ownNet.rollback ? 1 : 0;
     msg.netInputDelay = static_cast<uint8_t>(g_ownNet.inputDelay);
+    RunMode mode = ReadRunMode();
+    msg.stage = mode.stage;
+    msg.practice = mode.practice;
+    msg.spellPractice = mode.spellPractice;
+    msg.training = mode.training;
     return msg;
+}
+
+// The guest's stage is built in the host's run mode: the stage the host
+// started (main game, Extra, a practice stage), the practice flag (which
+// also decides whether the run goes on after the stage) and the training
+// option. All are set by the menu's start function before the scene init
+// reads them, so this runs before the init. Spell practice is left alone:
+// its stage is a boss fight the other side can't build. (docs/17)
+void AdoptHostRunMode() {
+    if (IsHost() || g_peerCommitSession != static_cast<uint16_t>(g_session + 1)) return;
+    RunMode own = ReadRunMode();
+    const RunMode& host = g_peerCommitMode;
+    if (own.spellPractice || host.spellPractice) return;
+    if (own.stage == host.stage && own.practice == host.practice && own.training == host.training) return;
+    ModLog("Netplay: building the stage in the host's run mode -- stage %d practice %d training %d (this game chose"
+           " stage %d practice %d training %d)", host.stage + 1, host.practice, host.training,
+           own.stage + 1, own.practice, own.training);
+    *Game::At<int32_t>(Game::kStageNumber) = host.stage;
+    *Game::At<uint8_t>(Game::kPracticeFlag) = host.practice;
+    *Game::At<uint8_t>(Game::kTrainingMode) = host.training;
 }
 
 // In the menus, keep the partner told what this player has selected: a
@@ -1246,6 +1332,7 @@ uint64_t Detour_SceneInit(void* scene) {
     if (g_connected) {
         SendCommittedLoadout();
         WaitForHostCommit();
+        AdoptHostRunMode();
         ModLog("Netplay: at scene init lives %d bombs %d, run start lives %d bombs %d",
                *Game::At<uint8_t>(Game::kLives), *Game::At<uint8_t>(Game::kBombs),
                *Game::At<uint8_t>(Game::kStageStartLives), *Game::At<uint8_t>(Game::kStageStartBombs));
@@ -1425,6 +1512,12 @@ bool Netplay_Install() {
     size_t p2Size = 0;
     void* p2State = Player2_StateRegion(&p2Size);
     Snapshot_AddRegion(p2State, p2Size);
+    // Both player structs are restored whole: their sprite VMs are written
+    // by the draw passes (so learned as volatile) but read back by gameplay
+    // -- a hit rewrites the shot's VM script (docs/17).
+    Snapshot_PinRva(Game::kPlayerStruct, Game::kPlayerStruct + Game::kPlayerStructSize);
+    size_t p2Offset = static_cast<size_t>(Player2_Struct() - static_cast<uint8_t*>(p2State));
+    Snapshot_PinExtra(0, p2Offset, p2Offset + Game::kPlayerStructSize);
     size_t rulesSize = 0;
     void* rulesState = CoopRules_StateRegion(&rulesSize);
     Snapshot_AddRegion(rulesState, rulesSize);

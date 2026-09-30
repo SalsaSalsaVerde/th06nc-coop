@@ -10,6 +10,7 @@ enum ChecksumRegion {
     kChecksumRng,
     kChecksumPlayer1,
     kChecksumPlayer2,
+    kChecksumShots, // both players' shots in flight (docs/17)
     kChecksumBullets,
     kChecksumEntities,
     kChecksumItems,

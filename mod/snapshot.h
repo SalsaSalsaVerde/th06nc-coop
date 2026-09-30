@@ -30,6 +30,14 @@ void Snapshot_AddIndirectRegion(uintptr_t pointerRva, size_t size);
 // owned object, docs/11).
 void Snapshot_MarkExtraVolatile(size_t regionIndex, size_t begin, size_t end);
 
+// Pinned bytes are restored even when calibration or draw learning marked
+// them volatile (they stay excluded from comparison): simulation state that
+// drawing also writes, such as the players' sprite VMs, which the shot-hit
+// code reads and rewrites (docs/17). RVAs for .data; region offsets for an
+// extra region.
+void Snapshot_PinRva(uintptr_t beginRva, uintptr_t endRva);
+void Snapshot_PinExtra(size_t regionIndex, size_t begin, size_t end);
+
 void Snapshot_BeginCalibration();
 void Snapshot_CalibrationSample(); // once per rendered frame while stalled
 void Snapshot_EndCalibration();
